@@ -10,32 +10,38 @@ class DataManager:
         """
         pass
 
-    def _next_index(self, daily_folder):
+    def _next_index(self, daily_folder, day):
         """Next sequence number based on distinct scan basenames in the folder.
 
         Counts unique ``mmddyy###`` basenames across both ``.csv`` and ``.npz``
         outputs so that 2D scans (which write .csv + .npz) and 3D scans (which
         write only .npz) share a single, collision-free counter.
+
+        ``day`` is the date prefix (``mmddyy``), not the folder name. Confocal
+        files live in ``RFSoC_confocal``, whose basename is not that prefix.
         """
         bases = set()
-        day = os.path.basename(daily_folder)
         for f in os.listdir(daily_folder):
             if f.startswith(day) and (f.endswith('.csv') or f.endswith('.npz')):
                 bases.add(os.path.splitext(f)[0])
         return len(bases) + 1
 
     def next_base_path(self, ext=''):
-        """Create today's folder and return the next sequential path.
+        """Create today's RFSoC confocal folder and return the next sequential path.
+
+        Scans acquired on this branch are written under
+        ``data/<mmddyy>/RFSoC_confocal/`` so they stay distinct from confocal
+        files saved by the TimeTagger / Pulse Streamer / Rigol branch, which
+        land directly in ``data/<mmddyy>/``.
 
         Args:
             ext: Optional extension (e.g. ``'.npz'``). If empty, returns the
                 base path without extension.
         """
         day = time.strftime("%m%d%y")
-        daily_folder = os.path.join(experiment_data_root(), day)
-        if not os.path.exists(daily_folder):
-            os.makedirs(daily_folder)
-        seq_str = f"{self._next_index(daily_folder):03d}"
+        daily_folder = os.path.join(experiment_data_root(), day, "RFSoC_confocal")
+        os.makedirs(daily_folder, exist_ok=True)
+        seq_str = f"{self._next_index(daily_folder, day):03d}"
         base = os.path.join(daily_folder, f"{day}{seq_str}")
         return base + ext if ext else base
 

@@ -134,11 +134,15 @@ acquire per offset, under a single board claim.
 | T1 | `T1FineRes` | T1 |
 
 Live windows take the board claim per update and skip a sample rather than
-wait, so a confocal scan can still start. Results are written under:
+wait, so a confocal scan can still start. Sweep results are written under:
 
 ```text
 data/mmddyy/RFSoC_<Experiment>/
 ```
+
+Confocal images (CSV, NPZ, TIFF, and PNG) from this branch go to
+`data/mmddyy/RFSoC_confocal/`, separate from the `data/mmddyy/` files saved
+by the TimeTagger / Pulse Streamer / Rigol branch.
 
 Each sweep contains CSV, compressed NPZ metadata, and a PDF with the fitted
 curve annotated. The CSV starts with `#` comment lines for the requested and
