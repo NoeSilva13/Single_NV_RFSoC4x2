@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from rfsoc.config import validate_linear_sweep
 from .base import (
     _array,
-    fine_sweep,
+    configuration_record,
+    executed_configuration,
     fit_curve,
     normalized_result,
     oscillation_spectrum,
-    spin_config,
-    spin_executed,
-    spin_requested,
 )
 
 
@@ -62,10 +59,10 @@ def _fit_rabi(result):
         "rabi_period_ns": period_ns,
         "rabi_period_error_ns": period_error_ns,
         "rabi_frequency_hz": 1e9 / period_ns,
-        "mw_pi2_ns": period_ns / 4,
-        "mw_pi2_error_ns": period_error_ns / 4,
-        "mw_pi_ns": period_ns / 2,
-        "mw_pi_error_ns": period_error_ns / 2,
+        "mw_pi2_ftns": period_ns / 4,
+        "mw_pi2_error_ftns": period_error_ns / 4,
+        "mw_pi_ftns": period_ns / 2,
+        "mw_pi_error_ftns": period_error_ns / 2,
         "decay_ns": float(popt[2]),
         "offset": float(popt[3]),
     }
@@ -82,48 +79,15 @@ def fitted_curve(result):
         x, fit["amplitude"], fit["rabi_period_ns"], fit["decay_ns"], fit["offset"]
     )
     label = (
-        f"mw_pi2_ns {fit['mw_pi2_ns']:.2f}\n"
-        f"mw_pi_ns {fit['mw_pi_ns']:.2f}\n"
+        f"mw_pi2_ftns {fit['mw_pi2_ftns']:.2f}\n"
+        f"mw_pi_ftns {fit['mw_pi_ftns']:.2f}\n"
         f"Rabi {fit['rabi_frequency_hz'] / 1e6:.3f} MHz"
     )
     return x, y, label
 
 
-def rabi(
-    session,
-    durations_ns,
-    *,
-    mw_frequency_hz=2.87e9,
-    laser_on_ns=3_000,
-    readout_ns=300,
-    laser_readout_offset_ns=100,
-    reference_start_ns=2_000,
-    mw_to_laser_delay_ns=500,
-    relax_delay_ns=2_000,
-    reps=100_000,
-    mw_gain=5_000,
-    get_reference=True,
-    progress=True,
-):
-    requested_x = validate_linear_sweep(durations_ns, "durations_ns")
-    cfg = spin_config(
-        session,
-        reps=reps,
-        mw_frequency_hz=mw_frequency_hz,
-        mw_gain=mw_gain,
-        laser_on_ns=laser_on_ns,
-        readout_ns=readout_ns,
-        laser_readout_offset_ns=laser_readout_offset_ns,
-        reference_start_ns=reference_start_ns,
-        mw_to_laser_delay_ns=mw_to_laser_delay_ns,
-        relax_delay_ns=relax_delay_ns,
-        get_reference=get_reference,
-    )
-    fine_sweep(cfg, "mw_duration", requested_x)
-    with session.acquisition():
-        from qickdawg.finetimingsuite import RabiFineRes
-
-        data = RabiFineRes(cfg).acquire(progress=progress)
+def rabi_result(cfg, data):
+    """Turn one ``RabiFineRes.acquire()`` payload into a fitted oscillation."""
     x_ns = _array(data, "mw_duration_ftns")
     result = normalized_result(
         kind="Rabi",
@@ -131,21 +95,9 @@ def rabi(
         x_unit="ns",
         x=x_ns,
         data=data,
-        integration_seconds=cfg.readout_integration_tns * 1e-9,
+        integration_seconds=float(cfg.readout_integration_tns) * 1e-9,
         reps=cfg.reps,
-        requested=spin_requested(
-            mw_frequency_hz=mw_frequency_hz,
-            mw_gain=mw_gain,
-            laser_on_ns=laser_on_ns,
-            readout_ns=readout_ns,
-            laser_readout_offset_ns=laser_readout_offset_ns,
-            reference_start_ns=reference_start_ns,
-            mw_to_laser_delay_ns=mw_to_laser_delay_ns,
-            relax_delay_ns=relax_delay_ns,
-            reps=reps,
-            get_reference=get_reference,
-            durations_ns=requested_x.tolist(),
-        ),
-        executed=spin_executed(cfg, durations_ns=x_ns.tolist()),
+        requested=configuration_record(cfg),
+        executed=executed_configuration(cfg, mw_duration_ftns=x_ns),
     )
     return _fit_rabi(result)

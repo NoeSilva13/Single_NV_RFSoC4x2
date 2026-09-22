@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from rfsoc.config import base_nv_config, validate_hardware_settings, validate_linear_sweep
-from rfsoc.process_lock import RFSoCBusyError
 from .base import (
     ExperimentResult,
     _array,
+    configuration_record,
+    executed_configuration,
     fit_curve,
     normalized_result,
-    spin_config,
-    spin_executed,
-    spin_requested,
 )
 
 
@@ -90,46 +87,16 @@ def _cw_contrast(reference, signal):
     )
 
 
-def _cw_odmr_config(session, requested_x, *, readout_ns, relax_delay_ns, reps, mw_gain):
-    validate_hardware_settings(float(requested_x.mean()))
-    cfg = base_nv_config(session, reps=reps)
-    cfg.readout_integration_tns = int(readout_ns)
-    cfg.relax_delay_tns = int(relax_delay_ns)
-    cfg.mw_gain = int(mw_gain)
-    cfg.mw_start_fMHz = requested_x[0] / 1e6
-    cfg.mw_end_fMHz = requested_x[-1] / 1e6
-    cfg.nsweep_points = int(requested_x.size)
-    return cfg
+def _integration_seconds(cfg):
+    return float(cfg.readout_integration_tns) * 1e-9
 
 
-def cw_odmr(
-    session,
-    frequencies_hz,
-    *,
-    readout_ns=100_000,
-    relax_delay_ns=2_000,
-    reps=5_000,
-    mw_gain=5_000,
-    progress=True,
-):
-    requested_x = validate_linear_sweep(frequencies_hz, "frequencies_hz")
-    cfg = _cw_odmr_config(
-        session,
-        requested_x,
-        readout_ns=readout_ns,
-        relax_delay_ns=relax_delay_ns,
-        reps=reps,
-        mw_gain=mw_gain,
-    )
-    with session.acquisition():
-        data = session.qd.LockinODMR(cfg).acquire(progress=progress)
-
+def lockin_result(cfg, data):
+    """Turn one ``LockinODMR.acquire()`` payload into a fitted spectrum."""
     signal = _array(data, "signal")
     reference = _array(data, "reference")
     x_mhz = _array(data, "frequencies")
-    contrast = _cw_contrast(reference, signal)
-    integration_s = cfg.readout_integration_tns * 1e-9
-    norm = integration_s * cfg.reps
+    norm = _integration_seconds(cfg) * int(cfg.reps)
     result = ExperimentResult(
         kind="CW_ODMR",
         x_name="Frequency",
@@ -139,132 +106,25 @@ def cw_odmr(
         reference_counts=reference,
         signal_rate_cps=signal / norm,
         reference_rate_cps=reference / norm,
-        contrast=contrast,
-        requested={
-            "frequencies_hz": requested_x.tolist(),
-            "readout_ns": readout_ns,
-            "relax_delay_ns": relax_delay_ns,
-            "reps": reps,
-            "mw_gain": mw_gain,
-        },
-        executed={
-            "frequencies_hz": (x_mhz * 1e6).tolist(),
-            "readout_ns": cfg.readout_integration_tns,
-            "relax_delay_ns": cfg.relax_delay_tns,
-            "reps": cfg.reps,
-            "mw_gain": cfg.mw_gain,
-        },
+        contrast=_cw_contrast(reference, signal),
+        requested=configuration_record(cfg),
+        executed=executed_configuration(cfg, frequencies=x_mhz),
     )
     return _fit_resonance(result)
 
 
-def cw_odmr_source(
-    session,
-    frequencies_hz,
-    *,
-    readout_ns=100_000,
-    relax_delay_ns=2_000,
-    reps=5_000,
-    mw_gain=5_000,
-):
-    """Compile one CW ODMR sweep and average its passes as they arrive.
-
-    Returns the frequency axis and a callable that runs one more pass, reporting
-    the contrast averaged over every pass so far, so a live window converges on
-    the line while it is watched.  Like the live count, it stands down rather
-    than wait: a busy board yields ``None``.
-    """
-    requested_x = validate_linear_sweep(frequencies_hz, "frequencies_hz")
-    cfg = _cw_odmr_config(
-        session,
-        requested_x,
-        readout_ns=readout_ns,
-        relax_delay_ns=relax_delay_ns,
-        reps=reps,
-        mw_gain=mw_gain,
-    )
-    program = session.qd.LockinODMR(cfg)
-    totals = {"signal": 0.0, "reference": 0.0}
-
-    def one_pass():
-        try:
-            with session.acquisition(blocking=False):
-                data = program.acquire(progress=False)
-        except RFSoCBusyError:
-            return None
-        totals["signal"] = totals["signal"] + _array(data, "signal")
-        totals["reference"] = totals["reference"] + _array(data, "reference")
-        return _cw_contrast(totals["reference"], totals["signal"])
-
-    return requested_x, one_pass
-
-
-def pulsed_odmr(
-    session,
-    frequencies_hz,
-    *,
-    mw_duration_ns=1_000,
-    laser_on_ns=3_000,
-    readout_ns=300,
-    laser_readout_offset_ns=100,
-    reference_start_ns=2_000,
-    mw_to_laser_delay_ns=500,
-    relax_delay_ns=2_000,
-    reps=100_000,
-    mw_gain=5_000,
-    get_reference=True,
-    progress=True,
-):
-    requested_x = validate_linear_sweep(frequencies_hz, "frequencies_hz")
-    cfg = spin_config(
-        session,
-        reps=reps,
-        mw_frequency_hz=float(requested_x.mean()),
-        mw_gain=mw_gain,
-        laser_on_ns=laser_on_ns,
-        readout_ns=readout_ns,
-        laser_readout_offset_ns=laser_readout_offset_ns,
-        reference_start_ns=reference_start_ns,
-        mw_to_laser_delay_ns=mw_to_laser_delay_ns,
-        relax_delay_ns=relax_delay_ns,
-        mw_pi_ns=mw_duration_ns,
-        get_reference=get_reference,
-    )
-    cfg.mw_start_fMHz = requested_x[0] / 1e6
-    cfg.mw_end_fMHz = requested_x[-1] / 1e6
-    cfg.nsweep_points = int(requested_x.size)
-    with session.acquisition():
-        from qickdawg.finetimingsuite import PODMRFineRes
-
-        data = PODMRFineRes(cfg).acquire(progress=progress)
-    x_hz = _array(data, "mw_fMHz") * 1e6
+def pulsed_result(cfg, data):
+    """Turn one ``PODMRFineRes.acquire()`` payload into a fitted spectrum."""
+    x_mhz = _array(data, "mw_fMHz")
     result = normalized_result(
         kind="Pulsed_ODMR",
         x_name="Frequency",
         x_unit="Hz",
-        x=x_hz,
+        x=x_mhz * 1e6,
         data=data,
-        integration_seconds=cfg.readout_integration_tns * 1e-9,
+        integration_seconds=_integration_seconds(cfg),
         reps=cfg.reps,
-        requested=spin_requested(
-            mw_frequency_hz=float(requested_x.mean()),
-            mw_gain=mw_gain,
-            laser_on_ns=laser_on_ns,
-            readout_ns=readout_ns,
-            laser_readout_offset_ns=laser_readout_offset_ns,
-            reference_start_ns=reference_start_ns,
-            mw_to_laser_delay_ns=mw_to_laser_delay_ns,
-            relax_delay_ns=relax_delay_ns,
-            reps=reps,
-            get_reference=get_reference,
-            mw_pi_ns=mw_duration_ns,
-            frequencies_hz=requested_x.tolist(),
-            mw_duration_ns=mw_duration_ns,
-        ),
-        executed=spin_executed(
-            cfg,
-            frequencies_hz=x_hz.tolist(),
-            mw_duration_ns=cfg.mw_pi_ftns,
-        ),
+        requested=configuration_record(cfg),
+        executed=executed_configuration(cfg, mw_fMHz=x_mhz),
     )
     return _fit_resonance(result)

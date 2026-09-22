@@ -103,16 +103,19 @@ tears down the streamer, which is QICK's own cleanup path.
 
 ## Experiment runner
 
-`run_odmr_experiments.py` is a file of experiment blocks. Edit the
-configuration in the block you want, uncomment it, comment the others, then:
+`run_odmr_experiments.py` is a file of experiment blocks. One
+`default_config` holds the shared `NVConfiguration`: assign time, frequency and
+phase with qickdawg's suffixes (`_tns` / `_tus` / `_treg`, `_fMHz` / `_fGHz` /
+`_freg`, and `_ftns` / `_ftus` / `_ftsamp` for FineRes pulses). Each block
+copies that config, adds its sweep with `start` / `stop` / `delta`, and calls
+the qickdawg program. Uncomment the block you want, comment the others, then:
 
 ```powershell
 python run_odmr_experiments.py
 ```
 
-Each block lists every parameter of that experiment. Live traces are `live_pl`
-and `live_cwodmr` in the same file: uncomment that call instead of the
-single-shot one.
+Live traces are `live_pl` and `live_cwodmr` in the same file: uncomment that
+call instead of the single-shot one. They take the same copied config.
 
 The pulsed experiments are the FineRes programs, whose microwave pulses land on
 DAC samples (about 0.2 ns) instead of on tProc cycles (about 3.3 ns). Each
@@ -126,8 +129,8 @@ acquire per offset, under a single board claim.
 | Dark Counts | `DarkCounts` | background rate |
 | CW ODMR / `live_cwodmr` | `LockinODMR` | resonance, linewidth |
 | Pulsed ODMR | `PODMRFineRes` | resonance, linewidth |
-| readout window | `CountingDurationFineRes` | `readout_ns`, `laser_on_ns`, `laser_readout_offset_ns` |
-| Rabi | `RabiFineRes` | `mw_pi2_ns`, `mw_pi_ns` |
+| readout window | `CountingDurationFineRes` | `readout_integration_tns`, `laser_on_tns`, `laser_readout_offset_tns` |
+| Rabi | `RabiFineRes` | `mw_pi2_ftns`, `mw_pi_ftns` |
 | Ramsey | `CPMGXYFineRes` (`n_cpmg=0`) | detuning, T2* |
 | Hahn Echo | `CPMGXYFineRes` (`n_cpmg=1`) | T2 |
 | CPMG-N | `CPMGXYFineRes` (`n_cpmg=N`) | T2 |
@@ -146,11 +149,12 @@ by the TimeTagger / Pulse Streamer / Rigol branch.
 
 Each sweep contains CSV, compressed NPZ metadata, and a PDF with the fitted
 curve annotated. The CSV starts with `#` comment lines for the requested and
-executed configuration and the fit, then the data table; read it with
-`pandas.read_csv(path, comment="#")`. Ramsey also plots the FFT of the
-free-precession trace. `get_reference=True` (the default) doubles each point
-with a microwave-off readout; pass `get_reference=False` in the block to
-halve the duration at the cost of that normalisation.
+executed configuration and the fit, in the `NVConfiguration` names, then the
+data table; read it with `pandas.read_csv(path, comment="#")`. Ramsey also
+plots the FFT of the free-precession trace. `get_reference=True` (set on
+`default_config`) doubles each point with a microwave-off readout; set it
+`False` on the copied config to halve the duration at the cost of that
+normalisation.
 
 ## Sharing the board between processes
 

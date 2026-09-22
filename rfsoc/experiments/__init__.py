@@ -1,23 +1,18 @@
-"""FPGA-swept RFSoC experiment API."""
+"""Result builders for qickdawg acquisitions."""
 
-from .counting import counting_source, dark_counts, pl_intensity
-from .cpmg import cpmg, hahn_echo, ramsey
-from .odmr import cw_odmr, cw_odmr_source, pulsed_odmr
-from .rabi import rabi
-from .readout_window import readout_window
-from .t1 import t1
+from .counting import counting_result
+from .cpmg import coherence_result
+from .odmr import lockin_result, pulsed_result
+from .rabi import rabi_result
+from .readout_window import window_result
+from .t1 import t1_result
 
 __all__ = [
-    "counting_source",
-    "cpmg",
-    "cw_odmr",
-    "cw_odmr_source",
-    "dark_counts",
-    "hahn_echo",
-    "pl_intensity",
-    "pulsed_odmr",
-    "rabi",
-    "ramsey",
-    "readout_window",
-    "t1",
+    "coherence_result",
+    "counting_result",
+    "lockin_result",
+    "pulsed_result",
+    "rabi_result",
+    "t1_result",
+    "window_result",
 ]

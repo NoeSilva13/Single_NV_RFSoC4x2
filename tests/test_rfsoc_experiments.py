@@ -5,14 +5,12 @@ import pytest
 from rfsoc.experiments.base import (
     CountingResult,
     ExperimentResult,
-    fine_sweep,
+    configuration_record,
     normalized_result,
-    spin_executed,
-    spin_requested,
 )
 from rfsoc.experiments.cpmg import _fit_decay, _fit_ramsey, ramsey_spectrum
 from rfsoc.experiments.io import fitted_curve, save_result
-from rfsoc.experiments.odmr import _fit_resonance
+from rfsoc.experiments.odmr import _fit_resonance, lockin_result
 from rfsoc.experiments.rabi import _fit_rabi
 from rfsoc.experiments.readout_window import _fit_window
 from rfsoc.experiments.t1 import _fit_t1
@@ -120,20 +118,33 @@ def test_a_counted_point_reports_a_rate_per_window_and_rep():
     assert result.rate_cps == pytest.approx(10_000)
 
 
-def test_fine_sweep_writes_the_three_attributes_the_programs_read():
+def test_configuration_record_keeps_qickdawg_names_and_skips_objects():
     cfg = FakeConfig()
-    values = fine_sweep(cfg, "tau", np.linspace(100, 1_000, 10))
-    assert cfg["tau_start_ftns"] == pytest.approx(100)
-    assert cfg["tau_end_ftns"] == pytest.approx(1_000)
-    assert cfg["nsweep_points"] == 10
-    assert cfg["scaling_mode"] == "linear"
-    np.testing.assert_allclose(values, np.linspace(100, 1_000, 10))
+    cfg.readout_integration_tns = 633
+    cfg.relax_delay_tus = 2
+    cfg.soccfg = object()
+    record = configuration_record(cfg)
+    assert record["readout_integration_tns"] == 633
+    assert record["relax_delay_tus"] == 2
+    assert "soccfg" not in record
+    assert "readout_ns" not in record
 
 
-def test_fine_sweep_refuses_an_uneven_axis():
+def test_a_sweep_result_records_the_configuration_in_qickdawg_names():
     cfg = FakeConfig()
-    with pytest.raises(ValueError):
-        fine_sweep(cfg, "tau", [100, 200, 400])
+    cfg.readout_integration_tns = 100_000
+    cfg.reps = 10
+    cfg.mw_gain = 5_000
+    data = {
+        "signal": np.array([80.0, 40.0]),
+        "reference": np.array([100.0, 100.0]),
+        "frequencies": np.array([2800.0, 2950.0]),
+    }
+    result = lockin_result(cfg, data)
+    assert result.requested["readout_integration_tns"] == 100_000
+    assert "readout_ns" not in result.requested
+    assert result.executed["frequencies"] == [2800.0, 2950.0]
+    np.testing.assert_allclose(result.x, [2.8e9, 2.95e9])
 
 
 def test_the_rabi_fit_recovers_the_pi_pulse_from_a_damped_oscillation():
@@ -146,8 +157,8 @@ def test_the_rabi_fit_recovers_the_pi_pulse_from_a_damped_oscillation():
     )
     fit = _fit_rabi(sweep_result("Rabi", durations_ns, contrast)).fit
     assert fit["rabi_period_ns"] == pytest.approx(100, rel=0.01)
-    assert fit["mw_pi_ns"] == pytest.approx(50, rel=0.01)
-    assert fit["mw_pi2_ns"] == pytest.approx(25, rel=0.01)
+    assert fit["mw_pi_ftns"] == pytest.approx(50, rel=0.01)
+    assert fit["mw_pi2_ftns"] == pytest.approx(25, rel=0.01)
     assert fit["rabi_frequency_hz"] == pytest.approx(10e6, rel=0.01)
 
 
@@ -198,9 +209,9 @@ def test_the_readout_window_fit_recommends_the_window_it_measured():
     contrast[photoluminescence_cps < 0.05 * photoluminescence_cps.max()] = 0.0
     fit = _fit_window(offsets_ns, contrast, photoluminescence_cps)
     assert fit["tau_ns"] == pytest.approx(400, rel=0.02)
-    assert fit["recommended_readout_integration_ns"] == pytest.approx(400, rel=0.02)
-    assert fit["recommended_laser_on_ns"] == pytest.approx(2_000, rel=0.02)
-    assert fit["recommended_laser_readout_offset_ns"] == pytest.approx(200)
+    assert fit["recommended_readout_integration_tns"] == pytest.approx(400, rel=0.02)
+    assert fit["recommended_laser_on_tns"] == pytest.approx(2_000, rel=0.02)
+    assert fit["recommended_laser_readout_offset_tns"] == pytest.approx(200)
 
 
 def test_a_fit_that_cannot_converge_is_reported_as_no_fit():
@@ -219,50 +230,7 @@ def test_the_fitted_curve_of_a_kind_is_drawable_through_the_registry():
     )
     x, y, label = fitted_curve(result)
     assert x.size == y.size
-    assert "mw_pi_ns" in label
-
-
-def test_spin_requested_records_the_timings_a_csv_needs_to_reproduce_the_sweep():
-    requested = spin_requested(
-        mw_frequency_hz=2.846e9,
-        mw_gain=32_767,
-        laser_on_ns=6_000,
-        readout_ns=633,
-        laser_readout_offset_ns=1_159,
-        reference_start_ns=5_000,
-        mw_to_laser_delay_ns=555,
-        relax_delay_ns=2_000,
-        reps=10_000,
-        durations_ns=[4, 500],
-    )
-    assert requested["laser_on_ns"] == 6_000
-    assert requested["laser_readout_offset_ns"] == 1_159
-    assert requested["mw_to_laser_delay_ns"] == 555
-    assert requested["relax_delay_ns"] == 2_000
-    assert requested["durations_ns"] == [4, 500]
-
-
-def test_spin_executed_reads_the_same_names_back_from_the_config():
-    cfg = FakeConfig()
-    cfg.mw_fGHz = 2.846
-    cfg.mw_gain = 32_767
-    cfg.laser_on_tns = 6_000
-    cfg.readout_integration_tns = 633
-    cfg.laser_readout_offset_tns = 1_159
-    cfg.readout_reference_start_tns = 5_000
-    cfg.mw_to_laser_delay_tns = 555
-    cfg.relax_delay_tns = 2_000
-    cfg.reps = 10_000
-    cfg.get_reference = True
-    cfg.mw_pi_ftns = 50.0
-    executed = spin_executed(cfg, durations_ns=[4.0, 500.0])
-    assert executed["mw_frequency_hz"] == pytest.approx(2.846e9)
-    assert executed["laser_on_ns"] == 6_000
-    assert executed["laser_readout_offset_ns"] == 1_159
-    assert executed["mw_to_laser_delay_ns"] == 555
-    assert executed["relax_delay_ns"] == 2_000
-    assert executed["mw_pi_ns"] == 50.0
-    assert executed["durations_ns"] == [4.0, 500.0]
+    assert "mw_pi_ftns" in label
 
 
 def test_save_result_writes_configuration_in_the_csv_header(tmp_path, monkeypatch):
@@ -280,20 +248,20 @@ def test_save_result_writes_configuration_in_the_csv_header(tmp_path, monkeypatc
         signal_rate_cps=np.array([10.0, 20.0]),
         reference_rate_cps=np.array([30.0, 40.0]),
         contrast=np.array([0.1, 0.2]),
-        requested={"laser_on_ns": 6_000, "durations_ns": list(range(249))},
-        executed={"laser_on_ns": 6_000, "reps": 10_000},
-        fit={"mw_pi_ns": 50.0},
+        requested={"laser_on_tns": 6_000, "mw_duration_ftns": list(range(249))},
+        executed={"laser_on_tns": 6_000, "reps": 10_000},
+        fit={"mw_pi_ftns": 50.0},
     )
     save_result(result)
     text = (tmp_path / "001_Rabi.csv").read_text(encoding="utf-8")
     assert text.startswith("# Measurement Time:")
     assert "# Kind: Rabi" in text
     assert "# Requested:" in text
-    assert "#   laser_on_ns: 6000" in text
-    assert "#   durations_ns: 0 to 248 (249 points)" in text
+    assert "#   laser_on_tns: 6000" in text
+    assert "#   mw_duration_ftns: 0 to 248 (249 points)" in text
     assert "# Executed:" in text
     assert "# Fit:" in text
-    assert "#   mw_pi_ns: 50.0" in text
+    assert "#   mw_pi_ftns: 50.0" in text
     table = pd.read_csv(tmp_path / "001_Rabi.csv", comment="#")
     assert list(table.columns) == [
         "MW_duration_ns",

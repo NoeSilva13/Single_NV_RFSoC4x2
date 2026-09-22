@@ -9,16 +9,6 @@ import numpy as np
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 
-from rfsoc.config import (
-    base_nv_config,
-    validate_hardware_settings,
-    validate_linear_sweep,
-)
-
-# The only step ratios NVConfiguration.add_exponential_sweep() knows how to
-# build, so an exponential axis has to pick one of them.
-EXP_SCALING_FACTORS = frozenset({"17/16", "9/8", "5/4", "3/2"})
-
 
 @dataclass
 class ExperimentResult:
@@ -53,149 +43,68 @@ class CountingResult:
         return self.counts / (self.window_seconds * self.reps)
 
 
-def spin_config(
-    session,
-    *,
-    reps,
-    mw_frequency_hz,
-    mw_gain,
-    laser_on_ns,
-    readout_ns,
-    laser_readout_offset_ns,
-    reference_start_ns,
-    mw_to_laser_delay_ns,
-    relax_delay_ns,
-    mw_pi2_ns=None,
-    mw_pi_ns=None,
-    n_cpmg=None,
-    get_reference=True,
-):
-    validate_hardware_settings(mw_frequency_hz)
-    cfg = base_nv_config(session, reps=reps)
-    cfg.mw_fGHz = float(mw_frequency_hz) / 1e9
-    cfg.mw_gain = int(mw_gain)
-    cfg.laser_on_tns = int(laser_on_ns)
-    cfg.readout_integration_tns = int(readout_ns)
-    cfg.laser_readout_offset_tns = int(laser_readout_offset_ns)
-    cfg.readout_reference_start_tns = int(reference_start_ns)
-    cfg.mw_to_laser_delay_tns = int(mw_to_laser_delay_ns)
-    cfg.relax_delay_tns = int(relax_delay_ns)
-    # Pulse lengths go in as fine time.  NVConfiguration derives the _ftsamp
-    # names the FineRes programs read, so a pulse lands on a DAC sample rather
-    # than on a tProc cycle: 0.2 ns of granularity instead of 3.3 ns.
-    if mw_pi2_ns is not None:
-        cfg.mw_pi2_ftns = float(mw_pi2_ns)
-    if mw_pi_ns is not None:
-        cfg.mw_pi_ftns = float(mw_pi_ns)
-    if n_cpmg is not None:
-        cfg.n_cpmg = int(n_cpmg)
-    # CPMGXYFineRes and T1FineRes read scaling_mode in initialize() without
-    # listing it in required_cfg, so a linear sweep has to say so out loud.
-    # add_exponential_sweep() overwrites both when the sweep is exponential.
-    cfg.scaling_mode = "linear"
-    cfg.scaling_factor = ""
-    # Four readouts per point with the reference, two without: dropping it
-    # halves the sweep and costs the MW-off normalisation.
-    cfg.get_reference = bool(get_reference)
-    return cfg
+_SKIP = object()
 
 
-def spin_requested(
-    *,
-    mw_frequency_hz,
-    mw_gain,
-    laser_on_ns,
-    readout_ns,
-    laser_readout_offset_ns,
-    reference_start_ns,
-    mw_to_laser_delay_ns,
-    relax_delay_ns,
-    reps,
-    get_reference=True,
-    mw_pi2_ns=None,
-    mw_pi_ns=None,
-    n_cpmg=None,
-    **extra,
-):
-    """User-facing kwargs that went into a pulsed sweep, plus any extras."""
-    settings = {
-        "mw_frequency_hz": mw_frequency_hz,
-        "mw_gain": mw_gain,
-        "laser_on_ns": laser_on_ns,
-        "readout_ns": readout_ns,
-        "laser_readout_offset_ns": laser_readout_offset_ns,
-        "reference_start_ns": reference_start_ns,
-        "mw_to_laser_delay_ns": mw_to_laser_delay_ns,
-        "relax_delay_ns": relax_delay_ns,
-        "reps": reps,
-        "get_reference": bool(get_reference),
-    }
-    if mw_pi2_ns is not None:
-        settings["mw_pi2_ns"] = mw_pi2_ns
-    if mw_pi_ns is not None:
-        settings["mw_pi_ns"] = mw_pi_ns
-    if n_cpmg is not None:
-        settings["n_cpmg"] = n_cpmg
-    settings.update(extra)
-    return settings
-
-
-_MISSING = object()
-
-
-def _cfg_get(cfg, name, default=None):
-    value = getattr(cfg, name, _MISSING)
-    if value is not _MISSING:
+def _plain(value):
+    """A JSON-friendly copy of a config value, or ``_SKIP`` when it is not one."""
+    if isinstance(value, np.ndarray):
+        return _plain(value.tolist())
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (list, tuple)):
+        plain = []
+        for item in value:
+            converted = _plain(item)
+            if converted is _SKIP:
+                return _SKIP
+            plain.append(converted)
+        return plain
+    if isinstance(value, (str, int, float, bool)) or value is None:
         return value
-    try:
-        return cfg[name]
-    except (KeyError, TypeError):
-        return default
+    return _SKIP
 
 
-def spin_executed(cfg, **extra):
-    """What the board actually ran, in the same names as ``spin_requested``."""
-    settings = {
-        "mw_frequency_hz": float(_cfg_get(cfg, "mw_fGHz")) * 1e9,
-        "mw_gain": int(_cfg_get(cfg, "mw_gain")),
-        "laser_on_ns": _cfg_get(cfg, "laser_on_tns"),
-        "readout_ns": _cfg_get(cfg, "readout_integration_tns"),
-        "laser_readout_offset_ns": _cfg_get(cfg, "laser_readout_offset_tns"),
-        "reference_start_ns": _cfg_get(cfg, "readout_reference_start_tns"),
-        "mw_to_laser_delay_ns": _cfg_get(cfg, "mw_to_laser_delay_tns"),
-        "relax_delay_ns": _cfg_get(cfg, "relax_delay_tns"),
-        "reps": _cfg_get(cfg, "reps"),
-        "get_reference": bool(_cfg_get(cfg, "get_reference", True)),
-    }
-    mw_pi2_ns = _cfg_get(cfg, "mw_pi2_ftns")
-    if mw_pi2_ns is not None:
-        settings["mw_pi2_ns"] = mw_pi2_ns
-    mw_pi_ns = _cfg_get(cfg, "mw_pi_ftns")
-    if mw_pi_ns is not None:
-        settings["mw_pi_ns"] = mw_pi_ns
-    n_cpmg = _cfg_get(cfg, "n_cpmg")
-    if n_cpmg is not None:
-        settings["n_cpmg"] = n_cpmg
-    settings.update(extra)
-    return settings
+def _config_names(cfg):
+    keys = getattr(cfg, "keys", None)
+    if callable(keys):
+        try:
+            return list(keys())
+        except TypeError:
+            pass
+    return [name for name in vars(cfg) if not str(name).startswith("_")]
 
 
-def fine_sweep(cfg, name, values_ns):
-    """Point the fine-time sweep *name* at *values_ns*, in nanoseconds.
+def configuration_record(cfg):
+    """Copy an NVConfiguration in the names qickdawg already uses.
 
-    Writes start, end and ``nsweep_points`` directly instead of calling
-    ``NVConfiguration.add_linear_sweep``, whose ``nsweep_points`` branch
-    computes the step backwards and lands one step past the requested end.  The
-    programs read exactly these three attributes, and the ``_ftns`` names carry
-    the conversion to the DAC samples they sweep over.
+    Unit assignment fills the sibling suffixes (``_tns`` / ``_tus`` / ``_treg``,
+    and the frequency and fine-time equivalents).  Those converted values are
+    what the program runs, so the record keeps them instead of a renamed set.
+    Objects such as ``soccfg`` are left out: the CSV and NPZ store numbers.
     """
-    values = validate_linear_sweep(values_ns, name)
-    cfg[f"{name}_start_ftns"] = float(values[0])
-    cfg[f"{name}_end_ftns"] = float(values[-1])
-    cfg.nsweep_points = int(values.size)
-    cfg.scaling_mode = "linear"
-    cfg.scaling_factor = ""
-    return values
+    record = {}
+    for name in _config_names(cfg):
+        if str(name).startswith("_"):
+            continue
+        try:
+            value = cfg[name]
+        except (KeyError, TypeError, AttributeError):
+            value = getattr(cfg, name, _SKIP)
+        plain = _plain(value)
+        if plain is _SKIP:
+            continue
+        record[str(name)] = plain
+    return record
+
+
+def executed_configuration(cfg, **axis):
+    """The configuration record plus the axis ``acquire()`` actually returned."""
+    executed = configuration_record(cfg)
+    for name, value in axis.items():
+        plain = _plain(value)
+        executed[name] = np.asarray(value).tolist() if plain is _SKIP else plain
+    return executed
 
 
 def fit_curve(model, x, y, p0, bounds=None, maxfev=20_000):

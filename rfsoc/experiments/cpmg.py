@@ -12,17 +12,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from rfsoc.config import validate_linear_sweep
 from .base import (
-    EXP_SCALING_FACTORS,
     _array,
-    fine_sweep,
+    configuration_record,
+    executed_configuration,
     fit_curve,
     normalized_result,
     oscillation_spectrum,
-    spin_config,
-    spin_executed,
-    spin_requested,
 )
 
 
@@ -130,73 +126,12 @@ def fitted_curve(result):
     return None
 
 
-def _coherence_sweep(
-    session,
-    taus_ns,
-    *,
-    kind,
-    n_cpmg,
-    scaling="linear",
-    scaling_factor="3/2",
-    mw_frequency_hz=2.87e9,
-    mw_pi2_ns=25.0,
-    laser_on_ns=6_000,
-    readout_ns=633,
-    laser_readout_offset_ns=1_159,
-    reference_start_ns=5_000,
-    mw_to_laser_delay_ns=555,
-    relax_delay_ns=2_000,
-    reps=10_000,
-    mw_gain=32_767,
-    get_reference=True,
-    progress=True,
-):
-    """Sweep the free precession time tau with *n_cpmg* refocusing pulses.
+def coherence_result(cfg, data, *, kind):
+    """Turn one ``CPMGXYFineRes.acquire()`` payload into a fitted decay.
 
-    ``tau`` is the delay between pulses, so the total precession time grows with
-    ``n_cpmg``; the reported axis is tau, as the program sweeps it.
+    Ramsey (``n_cpmg`` 0) is the oscillating decay.  Hahn echo and CPMG-N are
+    the plain exponential.  ``kind`` selects which of those the plot asks for.
     """
-    requested_x = np.asarray(list(taus_ns), dtype=float)
-    if requested_x.size < 2 or np.any(requested_x <= 0):
-        raise ValueError("taus_ns must contain at least two positive values")
-    if scaling == "linear":
-        validate_linear_sweep(requested_x, "taus_ns")
-    elif scaling == "exponential":
-        if scaling_factor not in EXP_SCALING_FACTORS:
-            raise ValueError(f"unsupported exponential factor: {scaling_factor}")
-    else:
-        raise ValueError("scaling must be 'linear' or 'exponential'")
-
-    cfg = spin_config(
-        session,
-        reps=reps,
-        mw_frequency_hz=mw_frequency_hz,
-        mw_gain=mw_gain,
-        laser_on_ns=laser_on_ns,
-        readout_ns=readout_ns,
-        laser_readout_offset_ns=laser_readout_offset_ns,
-        reference_start_ns=reference_start_ns,
-        mw_to_laser_delay_ns=mw_to_laser_delay_ns,
-        relax_delay_ns=relax_delay_ns,
-        # CPMGXYFineRes builds its pi pulses as two pi/2 pulses back to back.
-        mw_pi2_ns=mw_pi2_ns,
-        n_cpmg=n_cpmg,
-        get_reference=get_reference,
-    )
-    if scaling == "linear":
-        fine_sweep(cfg, "tau", requested_x)
-    else:
-        cfg.add_exponential_sweep(
-            "tau",
-            "ftus",
-            float(requested_x[0]) / 1e3,
-            float(requested_x[-1]) / 1e3,
-            scaling_factor=scaling_factor,
-        )
-    with session.acquisition():
-        from qickdawg.finetimingsuite import CPMGXYFineRes
-
-        data = CPMGXYFineRes(cfg).acquire(progress=progress)
     x_ns = _array(data, "tau_ftns")
     result = normalized_result(
         kind=kind,
@@ -204,60 +139,10 @@ def _coherence_sweep(
         x_unit="ns",
         x=x_ns,
         data=data,
-        integration_seconds=cfg.readout_integration_tns * 1e-9,
+        integration_seconds=float(cfg.readout_integration_tns) * 1e-9,
         reps=cfg.reps,
-        requested=spin_requested(
-            mw_frequency_hz=mw_frequency_hz,
-            mw_gain=mw_gain,
-            laser_on_ns=laser_on_ns,
-            readout_ns=readout_ns,
-            laser_readout_offset_ns=laser_readout_offset_ns,
-            reference_start_ns=reference_start_ns,
-            mw_to_laser_delay_ns=mw_to_laser_delay_ns,
-            relax_delay_ns=relax_delay_ns,
-            reps=reps,
-            get_reference=get_reference,
-            mw_pi2_ns=mw_pi2_ns,
-            n_cpmg=n_cpmg,
-            taus_ns=requested_x.tolist(),
-            scaling=scaling,
-            scaling_factor=scaling_factor,
-        ),
-        executed=spin_executed(
-            cfg,
-            taus_ns=x_ns.tolist(),
-            scaling=scaling,
-            scaling_factor=scaling_factor,
-        ),
+        requested=configuration_record(cfg),
+        executed=executed_configuration(cfg, tau_ftns=x_ns),
     )
+    n_cpmg = int(getattr(cfg, "n_cpmg", 0))
     return _fit_ramsey(result) if n_cpmg == 0 else _fit_decay(result)
-
-
-def ramsey(session, taus_ns, **kwargs):
-    """Free precession between two pi/2 pulses: detuning and T2*."""
-    return _coherence_sweep(session, taus_ns, kind="Ramsey", n_cpmg=0, **kwargs)
-
-
-def hahn_echo(session, taus_ns, *, scaling="exponential", **kwargs):
-    """One refocusing pulse between the two pi/2 pulses: T2.
-
-    The delay is swept exponentially by default, because an echo decay spanning
-    three decades is wasted on a linear grid.
-    """
-    return _coherence_sweep(
-        session, taus_ns, kind="Hahn_Echo", n_cpmg=1, scaling=scaling, **kwargs
-    )
-
-
-def cpmg(session, taus_ns, *, n_pulses=32, scaling="exponential", **kwargs):
-    """*n_pulses* refocusing pulses, alternating X and Y in blocks of eight."""
-    if int(n_pulses) < 1:
-        raise ValueError("CPMG needs at least one refocusing pulse")
-    return _coherence_sweep(
-        session,
-        taus_ns,
-        kind=f"CPMG_{int(n_pulses)}",
-        n_cpmg=int(n_pulses),
-        scaling=scaling,
-        **kwargs,
-    )
