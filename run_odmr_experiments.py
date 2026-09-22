@@ -94,6 +94,22 @@ def live_cwodmr(session, cfg):
     )
 
 
+def hold_laser(session, cfg):
+    """Leave the AOM gate open until Enter, then close it.
+
+    The board claim covers the whole wait, so the confocal live count stands
+    down instead of programming the same PMOD and dropping the gate.  Enter,
+    or Ctrl+C, closes the gate before the claim is released.
+    """
+    qd = session.qd
+    with session.acquisition():
+        try:
+            qd.laser_on(copy(cfg))
+            input("Laser on. Press Enter to turn it off. ")
+        finally:
+            qd.laser_off(copy(cfg))
+
+
 def report(result):
     """Save, plot and print whatever the experiment returned."""
     if result is None:
@@ -142,11 +158,10 @@ def main():
     default_config.reps = 10_000
     default_config.get_reference = True
 
-    # copy() so laser_on does not change the shared config.
-    # qd.laser_on(copy(default_config))
-    # qd.laser_off(copy(default_config))
-
     result = None
+
+    # 0. Laser on until Enter.  The confocal live count stands down, then resumes.
+    hold_laser(session, default_config)
 
     # 1. PL Intensity.  200_000 us is 0.2 s.  Uncomment live_pl to keep a trace
     # open until Ctrl+C.
@@ -165,21 +180,21 @@ def main():
     # result = acquire_counts(session, "DarkCounts", "Dark_Counts", cfg)
 
     # 3. CW ODMR.  Uncomment live_cwodmr, and set reps to 900, to average passes.
-    cfg = copy(default_config)
-    cfg.readout_integration_tus = 100
-    cfg.relax_delay_tus = 2
-    cfg.mw_gain = 5_000
-    cfg.reps = 5_000
-    center_mhz, width_mhz = 2875, 75
-    cfg.add_linear_sweep(
-        "mw", "fMHz",
-        start=center_mhz - width_mhz,
-        stop=center_mhz + width_mhz,
-        delta=150 / 79,
-    )
-    with session.acquisition():
-        data = qd.LockinODMR(cfg).acquire(progress=True)
-    result = lockin_result(cfg, data)
+    # cfg = copy(default_config)
+    # cfg.readout_integration_tus = 100
+    # cfg.relax_delay_tus = 2
+    # cfg.mw_gain = 5_000
+    # cfg.reps = 5_000
+    # center_mhz, width_mhz = 2875, 75
+    # cfg.add_linear_sweep(
+    #     "mw", "fMHz",
+    #     start=center_mhz - width_mhz,
+    #     stop=center_mhz + width_mhz,
+    #     delta=150 / 79,
+    # )
+    # with session.acquisition():
+    #     data = qd.LockinODMR(cfg).acquire(progress=True)
+    # result = lockin_result(cfg, data)
     # Instead of the acquire above: cfg.reps = 900, then average passes.
     # live_cwodmr(session, cfg)
 

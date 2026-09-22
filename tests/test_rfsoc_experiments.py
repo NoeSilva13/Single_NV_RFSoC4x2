@@ -111,6 +111,79 @@ def test_a_sweep_without_the_mw_off_reference_falls_back_to_the_laser_reference(
     np.testing.assert_allclose(result.reference_counts, [100.0, 50.0])
 
 
+def test_hold_laser_keeps_the_claim_until_the_gate_is_closed(monkeypatch):
+    from run_odmr_experiments import hold_laser
+
+    events = []
+
+    class Board:
+        def __init__(self):
+            self.qd = self
+
+        def acquisition(self):
+            board = self
+
+            class Claim:
+                def __enter__(self):
+                    events.append("claim")
+                    return board
+
+                def __exit__(self, *args):
+                    events.append("release")
+
+            return Claim()
+
+        def laser_on(self, cfg):
+            events.append(("on", cfg["marker"]))
+            cfg["marker"] = "mutated"
+
+        def laser_off(self, cfg):
+            events.append(("off", cfg["marker"]))
+
+    monkeypatch.setattr("builtins.input", lambda prompt: "")
+    cfg = {"marker": "shared"}
+    hold_laser(Board(), cfg)
+    assert events == ["claim", ("on", "shared"), ("off", "shared"), "release"]
+    assert cfg["marker"] == "shared"
+
+
+def test_hold_laser_closes_the_gate_when_the_wait_is_interrupted(monkeypatch):
+    from run_odmr_experiments import hold_laser
+
+    events = []
+
+    class Board:
+        def __init__(self):
+            self.qd = self
+
+        def acquisition(self):
+            board = self
+
+            class Claim:
+                def __enter__(self):
+                    events.append("claim")
+                    return board
+
+                def __exit__(self, *args):
+                    events.append("release")
+
+            return Claim()
+
+        def laser_on(self, cfg):
+            events.append("on")
+
+        def laser_off(self, cfg):
+            events.append("off")
+
+    def interrupt(prompt):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        hold_laser(Board(), {"marker": "shared"})
+    assert events == ["claim", "on", "off", "release"]
+
+
 def test_a_counted_point_reports_a_rate_per_window_and_rep():
     result = CountingResult(
         kind="PL_Intensity", counts=6_000, window_seconds=0.2, reps=3

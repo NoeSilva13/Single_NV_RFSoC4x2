@@ -125,6 +125,7 @@ acquire per offset, under a single board claim.
 
 | Block | Program | What the fit reports |
 | --- | --- | --- |
+| Laser on / `hold_laser` | `laser_on`, then `laser_off` | gate stays open until Enter |
 | PL Intensity / `live_pl` | `PLIntensity` | count rate |
 | Dark Counts | `DarkCounts` | background rate |
 | CW ODMR / `live_cwodmr` | `LockinODMR` | resonance, linewidth |
