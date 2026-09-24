@@ -9,7 +9,7 @@ from rfsoc.experiments.base import (
     normalized_result,
 )
 from rfsoc.experiments.cpmg import _fit_decay, _fit_ramsey, ramsey_spectrum
-from rfsoc.experiments.io import fitted_curve, save_result
+from rfsoc.experiments.io import fitted_curve, plot_result, save_result
 from rfsoc.experiments.odmr import _fit_resonance, lockin_result
 from rfsoc.experiments.rabi import _fit_rabi
 from rfsoc.experiments.readout_window import _fit_window
@@ -304,6 +304,39 @@ def test_the_fitted_curve_of_a_kind_is_drawable_through_the_registry():
     x, y, label = fitted_curve(result)
     assert x.size == y.size
     assert "mw_pi_ftns" in label
+
+
+def test_the_figure_draws_contrast_as_a_percentage(monkeypatch):
+    import matplotlib.pyplot as plt
+
+    closed = []
+    close_figure = plt.close
+    monkeypatch.setattr("rfsoc.experiments.io.plt.show", lambda: None)
+    monkeypatch.setattr("rfsoc.experiments.io.plt.close", lambda fig: closed.append(fig))
+    result = sweep_result(
+        "CW_ODMR", np.array([1e9, 3e9]), np.array([0.04, 0.02]), x_unit="Hz"
+    )
+    result.fit = {
+        "amplitude": -0.03,
+        "resonance_hz": 2e9,
+        "linewidth_hz": 1e7,
+        "offset": 0.01,
+    }
+    plot_result(result, save=False, show=False)
+    ax_y = closed[0].axes[1]
+    assert ax_y.get_ylabel() == "Contrast (%)"
+    np.testing.assert_allclose(ax_y.lines[0].get_ydata(), [4.0, 2.0])
+    # Off resonance the Lorentzian sits on the 0.01 offset, drawn as 1%.
+    assert ax_y.lines[1].get_ydata().max() == pytest.approx(1.0, abs=0.01)
+
+    t1 = sweep_result("T1", np.array([1.0, 2.0]), np.array([1.2, 0.8]))
+    plot_result(t1, save=False, show=False)
+    ax_t1 = closed[1].axes[1]
+    assert ax_t1.get_ylabel() == "Signal/reference"
+    np.testing.assert_allclose(ax_t1.lines[0].get_ydata(), [1.2, 0.8])
+
+    for fig in closed:
+        close_figure(fig)
 
 
 def test_save_result_writes_configuration_in_the_csv_header(tmp_path, monkeypatch):

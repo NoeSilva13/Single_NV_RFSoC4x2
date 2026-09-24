@@ -134,12 +134,18 @@ def fitted_curve(result):
     return None
 
 
-def _contrast_label(kind):
+def _contrast_for_plot(kind, contrast):
+    """Scale a stored contrast onto the axis the figure should show.
+
+    The files and the fits keep a fraction (0.04 is a 4% dip).  T1 is a
+    signal/reference ratio near one, so that axis stays in those units.
+    """
+    y = np.asarray(contrast, dtype=float)
     if kind == "T1":
-        return "Signal/reference"
+        return y, "Signal/reference"
     if kind == "Readout_Window":
-        return "Spin contrast"
-    return "Contrast"
+        return y * 100, "Spin contrast (%)"
+    return y * 100, "Contrast (%)"
 
 
 def plot_result(result, save=True, show=True):
@@ -164,14 +170,16 @@ def plot_result(result, save=True, show=True):
     ax_rates.legend()
     ax_rates.grid(True, alpha=0.3)
 
-    ax_y.plot(result.x, result.contrast, "o", markersize=3, label="measured")
+    plotted, ylabel = _contrast_for_plot(result.kind, result.contrast)
+    ax_y.plot(result.x, plotted, "o", markersize=3, label="measured")
     ax_y.set_xlabel(f"{result.x_name} ({result.x_unit})")
-    ax_y.set_ylabel(_contrast_label(result.kind))
+    ax_y.set_ylabel(ylabel)
     ax_y.grid(True, alpha=0.3)
 
     curve = fitted_curve(result)
     if curve is not None:
         fit_x, fit_y, label = curve
+        fit_y, _ = _contrast_for_plot(result.kind, fit_y)
         ax_y.plot(fit_x, fit_y, "-", color="tab:red", label="fit")
         ax_y.text(
             0.02,

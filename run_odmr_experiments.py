@@ -83,13 +83,13 @@ def live_cwodmr(session, cfg):
             return None
         totals["signal"] = totals["signal"] + _array(data, "signal")
         totals["reference"] = totals["reference"] + _array(data, "reference")
-        return _cw_contrast(totals["reference"], totals["signal"])
+        return _cw_contrast(totals["reference"], totals["signal"]) * 100
 
     live_curve(
         one_pass,
         x_mhz,
         xlabel="Frequency (MHz)",
-        ylabel="Contrast",
+        ylabel="Contrast (%)",
         title="CW ODMR",
     )
 
@@ -161,7 +161,7 @@ def main():
     result = None
 
     # 0. Laser on until Enter.  The confocal live count stands down, then resumes.
-    hold_laser(session, default_config)
+    # hold_laser(session, default_config)
 
     # 1. PL Intensity.  200_000 us is 0.2 s.  Uncomment live_pl to keep a trace
     # open until Ctrl+C.
@@ -181,9 +181,9 @@ def main():
 
     # 3. CW ODMR.  Uncomment live_cwodmr, and set reps to 900, to average passes.
     # cfg = copy(default_config)
-    # cfg.readout_integration_tus = 100
-    # cfg.relax_delay_tus = 2
-    # cfg.mw_gain = 5_000
+    # cfg.readout_integration_tus = 213
+    # cfg.relax_delay_tus = 1
+    # cfg.mw_gain = 12_000
     # cfg.reps = 5_000
     # center_mhz, width_mhz = 2875, 75
     # cfg.add_linear_sweep(
@@ -202,6 +202,8 @@ def main():
     # cfg = copy(default_config)
     # cfg.reps = 50_000
     # cfg.add_linear_sweep("mw", "fMHz", start=2800, stop=2950, delta=150 / 79)
+    # cfg.mw_gain = 15_000
+    # cfg.mw_pi_ftns = 50
     # with session.acquisition():
     #     data = PODMRFineRes(cfg).acquire(progress=True)
     # result = pulsed_result(cfg, data)
@@ -231,12 +233,21 @@ def main():
     # result = window_result(cfg, offsets, signal_on, signal_off)
 
     # 6. Rabi.  Two nanoseconds per step: ten DAC samples.
-    # cfg = copy(default_config)
-    # cfg.reps = 10_000
-    # cfg.add_linear_sweep("mw_duration", "ftns", start=4, stop=500, delta=2)
-    # with session.acquisition():
-    #     data = RabiFineRes(cfg).acquire(progress=True)
-    # result = rabi_result(cfg, data)
+    cfg = copy(default_config)
+    cfg.mw_gain = 32_767
+    cfg.mw_fMHz = 2887.3
+    cfg.reps = 400_000
+    cfg.readout_integration_tns = 300
+    cfg.laser_readout_offset_tus = 1.159
+    cfg.readout_reference_start_tus = 3.5
+    cfg.laser_on_tus = 4
+    cfg.relax_delay_tus = 1
+    cfg.get_reference = True
+    cfg.add_linear_sweep("mw_duration", "ftns", start=4, stop=500, delta=8)
+    cfg.add_linear_sweep("mw_duration", "ftns", start=4, stop=500, delta=8)
+    with session.acquisition():
+        data = RabiFineRes(cfg).acquire(progress=True)
+    result = rabi_result(cfg, data)
 
     # 7. Ramsey.  n_cpmg = 0 is free precession between two pi/2 pulses.
     # cfg = copy(default_config)
