@@ -1,7 +1,8 @@
 # RFSoC4x2 setup and bring-up
 
-This branch targets the RFSoC4x2 with QICK-DAWG. The `main` branch remains the
-implementation for TimeTagger, Pulse Streamer 8/2, and Rigol DSG836.
+This repository targets the RFSoC4x2 with QICK-DAWG. The TimeTagger, Pulse
+Streamer 8/2, and Rigol DSG836 implementation lives in
+[Single_NV_Scanning_Microscopy](https://github.com/NoeSilva13/Single_NV_Scanning_Microscopy).
 
 ## Software
 
@@ -144,9 +145,9 @@ wait, so a confocal scan can still start. Sweep results are written under:
 data/mmddyy/RFSoC_<Experiment>/
 ```
 
-Confocal images (CSV, NPZ, TIFF, and PNG) from this branch go to
+Confocal images (CSV, NPZ, TIFF, and PNG) from this repository go to
 `data/mmddyy/RFSoC_confocal/`, separate from the `data/mmddyy/` files saved
-by the TimeTagger / Pulse Streamer / Rigol branch.
+by [Single_NV_Scanning_Microscopy](https://github.com/NoeSilva13/Single_NV_Scanning_Microscopy).
 
 Each sweep contains CSV, compressed NPZ metadata, and a PDF with the fitted
 curve annotated. The CSV starts with `#` comment lines for the requested and

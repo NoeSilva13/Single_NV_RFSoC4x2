@@ -1,12 +1,12 @@
-# Single-NV microscopy — RFSoC4x2 branch
+# Single-NV microscopy — RFSoC4x2
 
-This branch controls a single-NV confocal microscope with an
+This repository controls a single-NV confocal microscope with an
 [RFSoC4x2 and QICK-DAWG](https://github.com/sandialabs/qick-dawg). It keeps the
-NI USB-6453 for galvo X/Y and piezo Z analog output while replacing the
-TimeTagger, Pulse Streamer 8/2, and Rigol microwave generator.
+NI USB-6453 for galvo X/Y and piezo Z analog output. Photon counting, laser
+gating, and microwave pulses run on the RFSoC.
 
-The `main` branch is the maintained implementation for the previous hardware.
-The branches are separate hardware products; there is no runtime backend flag.
+The TimeTagger, Pulse Streamer 8/2, and Rigol DSG836 implementation lives in
+[Single_NV_Scanning_Microscopy](https://github.com/NoeSilva13/Single_NV_Scanning_Microscopy).
 
 ## Entry points
 

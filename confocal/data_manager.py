@@ -29,10 +29,10 @@ class DataManager:
     def next_base_path(self, ext=''):
         """Create today's RFSoC confocal folder and return the next sequential path.
 
-        Scans acquired on this branch are written under
+        Scans acquired in this repository are written under
         ``data/<mmddyy>/RFSoC_confocal/`` so they stay distinct from confocal
-        files saved by the TimeTagger / Pulse Streamer / Rigol branch, which
-        land directly in ``data/<mmddyy>/``.
+        files saved by Single_NV_Scanning_Microscopy, which land directly in
+        ``data/<mmddyy>/``.
 
         Args:
             ext: Optional extension (e.g. ``'.npz'``). If empty, returns the
