@@ -3,7 +3,6 @@ import numpy as np
 import nidaqmx
 from nidaqmx.constants import (TerminalConfiguration, Edge, CountDirection, AcquisitionType, SampleTimingType)
 from nidaqmx.errors import DaqNotFoundError, DaqError
-import pyvisa
 import csv
 from typing import Generator, Tuple, Dict, Any
 
