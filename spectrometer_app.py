@@ -4,6 +4,7 @@ Qt-based CCD Camera Spectrometer Application
 Uses POA camera to capture horizontal line spectra and display wavelength vs intensity plots
 """
 
+import os
 import sys
 import time
 import json
@@ -20,6 +21,7 @@ import cv2
 # Import camera module
 from Camera.camera_video_mode import POACameraController
 from Camera import pyPOACamera
+from common.utils import experiment_data_root
 
 
 class CameraWorker(QThread):
@@ -982,22 +984,77 @@ class SpectrometerMainWindow(QMainWindow):
             self.record_button.setText("Stop Recording")
             self.status_bar.showMessage("Recording started")
     
+    @staticmethod
+    def _next_spectrum_base_path() -> str:
+        """Return the next sequential base path (no extension) for a spectrum.
+
+        Files go to ``data/<mmddyy>/Spectra/<mmddyy>###`` (same naming scheme as
+        the confocal scans). The counter is shared by the .csv and .png outputs.
+        """
+        day = time.strftime("%m%d%y")
+        folder = os.path.join(experiment_data_root(), day, "Spectra")
+        os.makedirs(folder, exist_ok=True)
+        bases = set()
+        for f in os.listdir(folder):
+            if f.startswith(day) and (f.endswith('.csv') or f.endswith('.png')):
+                bases.add(os.path.splitext(f)[0])
+        return os.path.join(folder, f"{day}{len(bases) + 1:03d}")
+
     def save_spectrum(self):
-        """Save current or recorded spectra"""
+        """Auto-save current or recorded spectra (CSV + PNG) in data/<day>/Spectra"""
         if self.recorded_spectra:
-            # Save recorded spectra
-            filename, _ = QFileDialog.getSaveFileName(self, "Save Recorded Spectra", "", "CSV Files (*.csv)")
-            if filename:
-                self.save_spectra_to_file(filename, self.recorded_spectra)
+            spectra = list(self.recorded_spectra)
         elif self.current_frame is not None:
-            # Save current spectrum
-            filename, _ = QFileDialog.getSaveFileName(self, "Save Current Spectrum", "", "CSV Files (*.csv)")
-            if filename:
-                wavelengths, intensities = self.spectrum_processor.process_frame(self.current_frame)
-                self.save_spectra_to_file(filename, [(wavelengths, intensities)])
-    
-    def save_spectra_to_file(self, filename: str, spectra: list):
-        """Save spectra to CSV file"""
+            wavelengths, intensities = self.spectrum_processor.process_frame(self.current_frame)
+            spectra = [(wavelengths, intensities)]
+        else:
+            self.status_bar.showMessage("No spectrum to save")
+            return
+
+        try:
+            base = self._next_spectrum_base_path()
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to create data folder: {str(e)}")
+            return
+
+        csv_path = base + ".csv"
+        png_path = base + ".png"
+        if self.save_spectra_to_file(csv_path, spectra):
+            self.save_spectrum_image(png_path, spectra)
+            self.status_bar.showMessage(f"Spectrum saved: {csv_path} (+ .png)")
+
+    def save_spectrum_image(self, filename: str, spectra: list) -> bool:
+        """Save a PNG plot of the spectrum (or recorded spectra) to ``filename``"""
+        try:
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+            fig = Figure(figsize=(8, 5), dpi=150)
+            FigureCanvasAgg(fig)
+            ax = fig.add_subplot(111)
+            if len(spectra) == 1:
+                w, y = spectra[0]
+                ax.plot(w, y, color='#00a080', linewidth=1.2)
+                ax.set_title("Spectrum")
+            else:
+                for w, y in spectra:
+                    ax.plot(w, y, color='gray', alpha=0.25, linewidth=0.6)
+                mean_y = np.mean([y for _, y in spectra], axis=0)
+                ax.plot(spectra[0][0], mean_y, color='#00a080', linewidth=1.5, label='Mean')
+                ax.legend()
+                ax.set_title(f"Spectra ({len(spectra)} recorded)")
+            ax.set_xlabel("Wavelength (nm)")
+            ax.set_ylabel("Intensity")
+            ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+            fig.savefig(filename)
+            return True
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save image: {str(e)}")
+            return False
+
+    def save_spectra_to_file(self, filename: str, spectra: list) -> bool:
+        """Save spectra to CSV file. Returns True on success."""
         try:
             with open(filename, 'w') as f:
                 if len(spectra) == 1:
@@ -1017,8 +1074,10 @@ class SpectrometerMainWindow(QMainWindow):
                         f.write(line + "\n")
             
             self.status_bar.showMessage(f"Spectra saved to {filename}")
+            return True
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save file: {str(e)}")
+            return False
     
     def clear_spectrum(self):
         """Clear spectrum plot"""
