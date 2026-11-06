@@ -21,6 +21,12 @@ class POACameraController:
         self.img_height = 0
         self.exposure = 50000  # microseconds
         self.gain = 300
+        # Hardware limits (queried from the SDK on connect). The fallbacks are
+        # the documented Player One range: exposure 32 us - 2000 s.
+        self.exposure_min_us = 32
+        self.exposure_max_us = 2000 * 1000000
+        self.gain_min = 0
+        self.gain_max = 1000
         self._camera_list = []
 
     @staticmethod
@@ -97,6 +103,9 @@ class POACameraController:
         img_size = pyPOACamera.ImageCalcSize(self.img_height, self.img_width, self.image_format)
         self.buffer = np.zeros(img_size, dtype=np.uint8)
         
+        # Read the real exposure/gain limits from the camera
+        self.query_limits()
+
         # Set initial exposure and gain
         self.set_exposure(self.exposure)
         self.set_gain(self.gain)
@@ -104,6 +113,35 @@ class POACameraController:
         self.is_connected = True
         return True
     
+    def query_limits(self) -> None:
+        """Query the camera's supported exposure and gain ranges from the SDK.
+
+        Updates ``exposure_min_us``/``exposure_max_us`` and ``gain_min``/
+        ``gain_max``. If a query fails, the previous (fallback) values are kept.
+        """
+        if self.camera_id is None:
+            return
+
+        def _limits(config):
+            try:
+                error, attrs = pyPOACamera.GetConfigAttributesByConfigID(self.camera_id, config)
+                if error != pyPOACamera.POAErrors.POA_OK:
+                    return None
+                lo, hi = int(attrs.minValue), int(attrs.maxValue)
+                return (lo, hi) if hi > lo else None
+            except Exception as e:
+                print(f"Error querying {config} limits: {e}")
+                return None
+
+        exp = _limits(pyPOACamera.POAConfig.POA_EXPOSURE)
+        if exp:
+            self.exposure_min_us, self.exposure_max_us = max(1, exp[0]), exp[1]
+        gain = _limits(pyPOACamera.POAConfig.POA_GAIN)
+        if gain:
+            self.gain_min, self.gain_max = gain
+        print(f"Camera limits - exposure: {self.exposure_min_us}-{self.exposure_max_us} us, "
+              f"gain: {self.gain_min}-{self.gain_max}")
+
     def disconnect(self) -> None:
         """Disconnect from the camera and release resources."""
         if self.is_streaming:
@@ -170,7 +208,8 @@ class POACameraController:
         Returns:
             bool: True if successful, False otherwise
         """
-        self.exposure = max(100, min(10000000, exposure_us))  # Clamp between 0.1ms and 10s
+        # Clamp to the camera's supported exposure range
+        self.exposure = int(max(self.exposure_min_us, min(self.exposure_max_us, exposure_us)))
         if self.is_connected and self.camera_id is not None:
             error = pyPOACamera.SetExp(self.camera_id, self.exposure, False)
             return error == pyPOACamera.POAErrors.POA_OK
@@ -197,12 +236,12 @@ class POACameraController:
         Set the camera gain.
         
         Args:
-            gain: Gain value (0-1000)
+            gain: Gain value (clamped to the camera's supported range)
             
         Returns:
             bool: True if successful, False otherwise
         """
-        self.gain = max(0, min(1000, gain))  # Clamp between 0 and 1000
+        self.gain = int(max(self.gain_min, min(self.gain_max, gain)))
         if self.is_connected and self.camera_id is not None:
             error = pyPOACamera.SetGain(self.camera_id, self.gain, False)
             return error == pyPOACamera.POAErrors.POA_OK

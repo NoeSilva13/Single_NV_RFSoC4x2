@@ -4,6 +4,7 @@ Qt-based CCD Camera Spectrometer Application
 Uses POA camera to capture horizontal line spectra and display wavelength vs intensity plots
 """
 
+import math
 import os
 import sys
 import time
@@ -129,6 +130,10 @@ class CameraWorker(QThread):
                 'max_height': max_h,
                 'exposure': self.camera.get_exposure(),
                 'gain': self.camera.get_gain(),
+                'exposure_min_us': self.camera.exposure_min_us,
+                'exposure_max_us': self.camera.exposure_max_us,
+                'gain_min': self.camera.gain_min,
+                'gain_max': self.camera.gain_max,
                 'model': self.camera.camera_props.cameraModelName if self.camera.camera_props else 'Unknown'
             }
         return {}
@@ -223,6 +228,9 @@ class SpectrometerMainWindow(QMainWindow):
 
     # App-defined resolution presets as (label, width, height). A trailing
     # "Custom..." entry (width/height typed manually) is appended in setup_ui.
+    # Number of steps of the logarithmic exposure slider
+    EXPOSURE_SLIDER_STEPS = 1000
+
     RESOLUTION_PRESETS = [
         ("6252 x 480 (Spectrometer)", 6252, 480),
         ("6252 x 4176 (Full)", 6252, 4176),
@@ -419,15 +427,25 @@ class SpectrometerMainWindow(QMainWindow):
         
         # Exposure control
         camera_layout.addWidget(QLabel("Exposure:"), 0, 0)
-        self.exposure_label = QLabel("50.0 ms")
-        self.exposure_label.setMinimumWidth(60)
-        self.exposure_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        camera_layout.addWidget(self.exposure_label, 0, 1)
+        # Exposure range in ms (updated from the camera's real limits on connect).
+        # The slider is logarithmic so the whole range (10 us - 2000 s) is usable;
+        # the spin box allows typing an exact value.
+        self.exposure_range_ms = (0.01, 2000000.0)
+        self.exposure_ms = 50.0
+        self.exposure_spinbox = QDoubleSpinBox()
+        self.exposure_spinbox.setDecimals(3)
+        self.exposure_spinbox.setRange(*self.exposure_range_ms)
+        self.exposure_spinbox.setValue(self.exposure_ms)
+        self.exposure_spinbox.setSuffix(" ms")
+        self.exposure_spinbox.setKeyboardTracking(False)
+        self.exposure_spinbox.setMinimumWidth(110)
+        self.exposure_spinbox.setToolTip("Exposure time in milliseconds (type an exact value)")
+        camera_layout.addWidget(self.exposure_spinbox, 0, 1)
         
         self.exposure_slider = QSlider(Qt.Orientation.Horizontal)
-        self.exposure_slider.setRange(1, 100000)  # 0.1ms to 10000ms (10s, will divide by 10)
-        self.exposure_slider.setValue(500)  # 50ms default
-        self.exposure_slider.setToolTip("Exposure time in milliseconds")
+        self.exposure_slider.setRange(0, self.EXPOSURE_SLIDER_STEPS)
+        self.exposure_slider.setValue(self._exposure_ms_to_slider(self.exposure_ms))
+        self.exposure_slider.setToolTip("Exposure time (logarithmic scale)")
         camera_layout.addWidget(self.exposure_slider, 0, 2)
         
         # Gain control
@@ -440,7 +458,7 @@ class SpectrometerMainWindow(QMainWindow):
         self.gain_slider = QSlider(Qt.Orientation.Horizontal)
         self.gain_slider.setRange(0, 1000)
         self.gain_slider.setValue(300)
-        self.gain_slider.setToolTip("Camera gain (0-1000)")
+        self.gain_slider.setToolTip("Camera gain (range is set from the camera on connect)")
         camera_layout.addWidget(self.gain_slider, 1, 2)
         
         # Control buttons
@@ -609,7 +627,8 @@ class SpectrometerMainWindow(QMainWindow):
         self.clear_dark_button.clicked.connect(self.clear_dark)
         
         # Control connections
-        self.exposure_slider.valueChanged.connect(self.update_exposure)
+        self.exposure_slider.valueChanged.connect(self.on_exposure_slider_changed)
+        self.exposure_spinbox.valueChanged.connect(self.on_exposure_spinbox_changed)
         self.gain_slider.valueChanged.connect(self.update_gain)
         self.roi_start_spinbox.valueChanged.connect(self.update_roi)
         self.roi_height_spinbox.valueChanged.connect(self.update_roi)
@@ -621,51 +640,81 @@ class SpectrometerMainWindow(QMainWindow):
         self.save_button.clicked.connect(self.save_spectrum)
         self.clear_button.clicked.connect(self.clear_spectrum)
     
+    # ---- Exposure / gain helpers ----
+    def _exposure_ms_to_slider(self, ms: float) -> int:
+        """Map an exposure in ms to a position on the logarithmic slider."""
+        lo, hi = self.exposure_range_ms
+        ms = min(max(ms, lo), hi)
+        frac = math.log(ms / lo) / math.log(hi / lo)
+        return int(round(frac * self.EXPOSURE_SLIDER_STEPS))
+
+    def _slider_to_exposure_ms(self, pos: int) -> float:
+        """Map a logarithmic slider position to an exposure in ms."""
+        lo, hi = self.exposure_range_ms
+        frac = pos / self.EXPOSURE_SLIDER_STEPS
+        return lo * (hi / lo) ** frac
+
+    def _set_exposure_widgets(self, exposure_ms: float):
+        """Show ``exposure_ms`` in the slider and spin box without sending it to the camera."""
+        lo, hi = self.exposure_range_ms
+        exposure_ms = min(max(exposure_ms, lo), hi)
+        self.exposure_slider.blockSignals(True)
+        self.exposure_spinbox.blockSignals(True)
+        self.exposure_slider.setValue(self._exposure_ms_to_slider(exposure_ms))
+        self.exposure_spinbox.setValue(exposure_ms)
+        self.exposure_slider.blockSignals(False)
+        self.exposure_spinbox.blockSignals(False)
+        self.exposure_ms = exposure_ms
+
+    def _apply_camera_limits(self, info: dict):
+        """Set exposure/gain control ranges from the camera's real limits."""
+        exp_min_us = info.get('exposure_min_us')
+        exp_max_us = info.get('exposure_max_us')
+        if exp_min_us and exp_max_us and exp_max_us > exp_min_us:
+            self.exposure_range_ms = (exp_min_us / 1000.0, exp_max_us / 1000.0)
+            self.exposure_spinbox.blockSignals(True)
+            self.exposure_spinbox.setRange(*self.exposure_range_ms)
+            self.exposure_spinbox.blockSignals(False)
+            self._set_exposure_widgets(self.exposure_ms)
+
+        gain_min = info.get('gain_min')
+        gain_max = info.get('gain_max')
+        if gain_min is not None and gain_max is not None and gain_max > gain_min:
+            self.gain_slider.blockSignals(True)
+            self.gain_slider.setRange(int(gain_min), int(gain_max))
+            self.gain_slider.blockSignals(False)
+            self.gain_slider.setToolTip(f"Camera gain ({int(gain_min)}-{int(gain_max)})")
+
     def sync_gui_with_camera_values(self):
         """Synchronize GUI controls with actual camera values"""
         try:
             # Wait a moment for camera to be ready
-            import time
             time.sleep(0.1)
-            
+
             info = self.camera_worker.get_camera_info()
             if info:
+                # Ranges first, so the actual values fit inside the controls
+                self._apply_camera_limits(info)
+
                 # Get actual camera values
                 actual_exposure_us = info.get('exposure', 50000)
                 actual_gain = info.get('gain', 300)
-                
-                # Convert exposure from microseconds to milliseconds
                 actual_exposure_ms = actual_exposure_us / 1000.0
-                
-                # Only update GUI if values are different from current GUI values
-                current_exposure_ms = self.exposure_slider.value() / 10.0  # Convert slider value to ms
-                current_gain = self.gain_slider.value()
-                
-                if abs(current_exposure_ms - actual_exposure_ms) > 0.1 or current_gain != actual_gain:
-                    # Temporarily disconnect signals to avoid triggering camera updates
-                    self.exposure_slider.valueChanged.disconnect()
-                    self.gain_slider.valueChanged.disconnect()
-                    
-                    # Update GUI with actual values
-                    self.exposure_slider.setValue(int(actual_exposure_ms * 10))  # Convert ms to slider value
-                    self.gain_slider.setValue(actual_gain)
-                    
-                    # Update labels
-                    self.exposure_label.setText(f"{actual_exposure_ms:.1f} ms")
-                    self.gain_label.setText(str(actual_gain))
-                    
-                    # Reconnect signals
-                    self.exposure_slider.valueChanged.connect(self.update_exposure)
-                    self.gain_slider.valueChanged.connect(self.update_gain)
-                    
-                    print(f"GUI updated with actual camera values - Exposure: {actual_exposure_ms:.1f}ms, Gain: {actual_gain}")
-                
+
+                # Update GUI with actual values without re-triggering camera updates
+                self._set_exposure_widgets(actual_exposure_ms)
+                self.gain_slider.blockSignals(True)
+                self.gain_slider.setValue(actual_gain)
+                self.gain_slider.blockSignals(False)
+                self.gain_label.setText(str(actual_gain))
+
                 # Update status to show actual values
-                self.status_bar.showMessage(f"Camera ready - Exposure: {actual_exposure_ms:.1f}ms, Gain: {actual_gain}")
-                
+                self.status_bar.showMessage(
+                    f"Camera ready - Exposure: {actual_exposure_ms:.3f} ms, Gain: {actual_gain}")
+
         except Exception as e:
             print(f"Error syncing GUI with camera values: {e}")
-    
+
     def initialize_camera(self):
         """Initialize camera connection"""
         self.status_bar.showMessage("Initializing camera...")
@@ -833,13 +882,17 @@ class SpectrometerMainWindow(QMainWindow):
         self.status_bar.showMessage(f"Error: {error_msg}")
         QMessageBox.critical(self, "Camera Error", error_msg)
     
-    def update_exposure(self, value: int):
-        """Update camera exposure from slider"""
-        exposure_ms = value / 10.0  # Convert slider value to ms (0.1ms precision)
-        exposure_us = int(exposure_ms * 1000)  # Convert ms to us
-        self.exposure_label.setText(f"{exposure_ms:.1f} ms")
-        self.camera_worker.set_exposure(exposure_us)
-    
+    def on_exposure_slider_changed(self, pos: int):
+        """Exposure slider moved (logarithmic scale)"""
+        exposure_ms = self._slider_to_exposure_ms(pos)
+        self._set_exposure_widgets(exposure_ms)
+        self.camera_worker.set_exposure(int(round(exposure_ms * 1000)))
+
+    def on_exposure_spinbox_changed(self, exposure_ms: float):
+        """Exposure typed in the spin box (ms)"""
+        self._set_exposure_widgets(exposure_ms)
+        self.camera_worker.set_exposure(int(round(exposure_ms * 1000)))
+
     def update_gain(self, value: int):
         """Update camera gain from slider"""
         self.gain_label.setText(str(value))
@@ -875,7 +928,7 @@ class SpectrometerMainWindow(QMainWindow):
                 "width": self.roi_width_spinbox.value(),
             },
             "camera": {
-                "exposure_ms": self.exposure_slider.value() / 10.0,
+                "exposure_ms": self.exposure_ms,
                 "gain": self.gain_slider.value(),
             },
             "wavelength": {
@@ -941,7 +994,8 @@ class SpectrometerMainWindow(QMainWindow):
             # Camera controls
             if "exposure_ms" in camera:
                 exposure_ms = float(camera["exposure_ms"])
-                self.exposure_slider.setValue(int(round(exposure_ms * 10)))
+                # Spin box signal applies it to the camera (clamped to its range)
+                self.exposure_spinbox.setValue(exposure_ms)
             if "gain" in camera:
                 self.gain_slider.setValue(int(camera["gain"]))
             
