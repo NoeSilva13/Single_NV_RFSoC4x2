@@ -295,6 +295,92 @@ def test_the_deer_spectrum_is_the_echo_the_target_pulse_destroys():
     assert "resonance" in label
 
 
+def test_a_coupling_converts_to_the_distance_of_two_electron_spins():
+    from rfsoc.experiments.deer import dipolar_distance_nm
+
+    assert dipolar_distance_nm(52.04e6) == pytest.approx(1.0)
+    # 52 kHz is ten times farther: the coupling falls as r**-3.
+    assert dipolar_distance_nm(52.04e3) == pytest.approx(10.0)
+    assert dipolar_distance_nm(52.04e3, angular_factor=2) == pytest.approx(
+        10.0 * 2 ** (1 / 3)
+    )
+
+
+def test_the_deer_tau_fit_recovers_the_coupling_and_the_distance():
+    from rfsoc.experiments.deer import deer_tau_result
+
+    cfg = FakeConfig()
+    cfg.readout_integration_tns = 300
+    cfg.reps = 1_000
+    taus_ns = np.arange(200, 20_000, 200.0)
+    coupling_mhz = 0.2
+    lost = 0.3 / 2 * (
+        1 - np.cos(2 * np.pi * coupling_mhz * 1e-3 * taus_ns) * np.exp(-taus_ns / 30_000)
+    )
+    hahn = np.full(taus_ns.size, 1000.0)
+    laser = np.full(taus_ns.size, 1200.0)
+    readouts = {
+        "signal1": hahn * (1 - lost),
+        "reference1": laser,
+        "signal2": hahn,
+        "reference2": laser,
+    }
+    result = deer_tau_result(cfg, taus_ns, readouts)
+    assert result.kind == "DEER_Tau"
+    np.testing.assert_allclose(result.contrast, lost)
+    fit = result.fit
+    assert fit["dipolar_coupling_hz"] == pytest.approx(0.2e6, rel=0.01)
+    assert fit["decay_ns"] == pytest.approx(30_000, rel=0.05)
+    assert fit["distance_nm"] == pytest.approx((52.04 / 0.2) ** (1 / 3), rel=0.01)
+    assert fit["max_distance_nm"] > fit["distance_nm"]
+    x, y, label = fitted_curve(result)
+    assert x.size == y.size
+    assert "nu_dd" in label
+
+
+def test_the_deer_tau_walk_holds_the_target_and_steps_tau(monkeypatch):
+    from run_odmr_experiments import deer_tau_walk
+
+    claims = []
+
+    class Board:
+        def acquisition(self):
+            class Claim:
+                def __enter__(self):
+                    claims.append("claim")
+
+                def __exit__(self, *args):
+                    claims.append("release")
+
+            return Claim()
+
+    seen = []
+
+    class Program:
+        def __init__(self, cfg):
+            seen.append(
+                (cfg.tau_ftns, cfg.mw2_start_fMHz, cfg.mw2_end_fMHz, cfg.nsweep_points)
+            )
+            self.tau = cfg.tau_ftns
+
+        def acquire(self, progress=False):
+            # Two identical frequency points per acquire, averaged by the walk.
+            return {
+                "signal1": np.array([self.tau, self.tau + 2]),
+                "reference1": np.array([10.0, 10.0]),
+                "signal2": np.array([20.0, 20.0]),
+                "reference2": np.array([30.0, 30.0]),
+            }
+
+    cfg = FakeConfig()
+    taus, readouts = deer_tau_walk(Board(), cfg, [100, 300], 2890.0, program=Program)
+    assert claims == ["claim", "release"]
+    assert seen == [(100.0, 2890.0, 2890.0, 2), (300.0, 2890.0, 2890.0, 2)]
+    np.testing.assert_allclose(taus, [100, 300])
+    np.testing.assert_allclose(readouts["signal1"], [101, 301])
+    np.testing.assert_allclose(readouts["reference2"], [30, 30])
+
+
 def test_the_t1_fit_recovers_t1():
     delays_ns = np.geomspace(1e3, 3e7, 50)
     contrast = 0.5 * np.exp(-delays_ns * 1e-9 / 5e-3) + 0.5

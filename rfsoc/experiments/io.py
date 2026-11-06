@@ -12,6 +12,7 @@ import pandas as pd
 
 from common.utils import experiment_data_root
 from .cpmg import fitted_curve as _cpmg_curve, ramsey_spectrum
+from .deer import fitted_curve as _deer_tau_curve
 from .odmr import fitted_curve as _odmr_curve
 from .rabi import fitted_curve as _rabi_curve
 from .readout_window import fitted_curve as _window_curve
@@ -129,6 +130,8 @@ def fitted_curve(result):
         return _cpmg_curve(result)
     if kind == "T1":
         return _t1_curve(result)
+    if kind == "DEER_Tau":
+        return _deer_tau_curve(result)
     if kind == "Readout_Window":
         return _window_curve(result)
     return None

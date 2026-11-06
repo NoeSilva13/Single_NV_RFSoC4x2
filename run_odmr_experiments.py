@@ -31,6 +31,7 @@ from rfsoc.experiments import (
     coherence_result,
     counting_result,
     deer_spectrum_result,
+    deer_tau_result,
     lockin_result,
     pulsed_result,
     rabi_result,
@@ -98,6 +99,41 @@ def live_cwodmr(session, cfg):
         ylabel="Contrast (%)",
         title="CW ODMR",
     )
+
+
+DEER_READOUTS = ("signal1", "reference1", "signal2", "reference2")
+
+
+def deer_tau_walk(session, cfg, taus_ns, frequency_mhz, program=DEERSpectrumFineRes):
+    """Step tau from the host with the target pulse held at *frequency_mhz*.
+
+    The schedule is fixed when the program compiles, so every tau is its own
+    acquire, all under one board claim.  The program still needs a frequency
+    sweep and qickdawg's sweep step divides by points - 1, so each acquire plays
+    two identical points at *frequency_mhz* and they are averaged.  Returns the
+    tau each acquire actually ran, after DAC-sample rounding, and the four
+    readouts stacked per tau.
+    """
+    cfg.mw2_start_fMHz = frequency_mhz
+    cfg.mw2_end_fMHz = frequency_mhz
+    cfg.nsweep_points = 2
+    executed = np.zeros(len(taus_ns))
+    readouts = {key: np.zeros(len(taus_ns)) for key in DEER_READOUTS}
+    with session.acquisition():
+        for index, tau_ns in enumerate(taus_ns):
+            cfg.tau_ftns = float(tau_ns)
+            executed[index] = cfg.tau_ftns
+            data = program(cfg).acquire(progress=False)
+            for key in DEER_READOUTS:
+                readouts[key][index] = float(np.mean(_array(data, key)))
+            print(
+                f"DEER tau {index + 1}/{len(taus_ns)} "
+                f"tau {cfg.tau_ftns:.1f} ns",
+                end="\r",
+                flush=True,
+            )
+        print()
+    return executed, readouts
 
 
 def hold_laser(session, cfg):
@@ -322,6 +358,25 @@ def main():
     # with session.acquisition():
     #     data = DEERSpectrumFineRes(cfg).acquire(progress=True)
     # result = deer_spectrum_result(cfg, data)
+
+    # 12. DEER vs tau: dipolar coupling and distance.  The target pulse sits on
+    # the resonance block 11 found; tau is walked from the host.  Step tau finely
+    # enough to sample the oscillation: at least four points per 1/nu_dd.  The
+    # distance assumes |1 - 3cos^2 theta| = 1; max_distance_nm bounds it for any
+    # angle.  tau runs from the end of one sensor pulse to the start of the next.
+    # cfg = copy(default_config)
+    # cfg.reps = 50_000
+    # cfg.get_reference = True
+    # cfg.mw2_gain = 32_767
+    # cfg.mw2_pi_ftns = 50
+    # cfg.mw2_offset_ftns = 0
+    # target_mhz = 2890.0
+    # validate_hardware_settings(
+    #     cfg.mw_fMHz * 1e6, mw2_frequency_hz=target_mhz * 1e6
+    # )
+    # taus_ns = np.arange(200, 20_000, 200)
+    # executed_taus_ns, readouts = deer_tau_walk(session, cfg, taus_ns, target_mhz)
+    # result = deer_tau_result(cfg, executed_taus_ns, readouts)
 
     return report(result)
 

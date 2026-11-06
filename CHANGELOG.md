@@ -9,6 +9,10 @@ All notable changes to this project will be documented in this file following [K
   is swept in the FPGA, as block 11 of `run_odmr_experiments.py`. Each point
   reads the echo with and without the target pulse; `deer_spectrum_result`
   fits the dip for the target resonance and linewidth.
+- DEER vs tau (block 12): `deer_tau_walk()` steps tau from the host with the
+  target pulse held on resonance, and `deer_tau_result` fits the dipolar
+  oscillation for the coupling `nu_dd`, the distance at
+  `|1 - 3cos^2 theta| = 1`, and the largest distance any orientation allows.
 - `RFSOC_MW2_CHANNEL` / `RFSOC_MW2_NQZ` for the second tone,
   `validate_tone()` and a `mw2_frequency_hz` check in
   `validate_hardware_settings()`, and `check_second_generator()` in

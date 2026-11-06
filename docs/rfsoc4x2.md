@@ -144,6 +144,7 @@ acquire per offset, under a single board claim.
 | CPMG-N | `CPMGXYFineRes` (`n_cpmg=N`) | T2 |
 | T1 | `T1FineRes` | T1 |
 | DEER spectrum | `DEERSpectrumFineRes` (this repo) | target resonance, linewidth |
+| DEER vs tau | `DEERSpectrumFineRes`, tau walked from the host | dipolar coupling, distance |
 
 ### DEER spectrum
 
@@ -165,6 +166,29 @@ Calibrate in this order:
    `mw2_offset_ftns`.
 3. Hahn echo on the sensor; take `tau_ftns` near T2/2.
 4. DEER spectrum.
+5. DEER vs tau at the resonance the spectrum found.
+
+### DEER vs tau
+
+`deer_tau_walk()` in `run_odmr_experiments.py` holds the target pulse at one
+frequency and runs one acquire per tau under a single board claim, because the
+pulse schedule is fixed when the program compiles. Each acquire plays two
+identical frequency points, since qickdawg's sweep cannot have one, and
+averages them. Flipping the target at the sensor's pi pulse leaves the sensor
+a phase `2 pi nu_dd tau`, so the lost fraction of the echo is fitted as
+
+```text
+C(tau) = A/2 * (1 - cos(2 pi nu_dd tau) * exp(-tau / decay)) + offset
+```
+
+and the fit reports `dipolar_coupling_hz`, the distance
+`r = (52.04 MHz nm^3 * |1 - 3cos^2 theta| / nu_dd)^(1/3)` at an angular factor
+of 1 (`distance_nm`), and `max_distance_nm` at the largest factor, 2, which
+bounds the separation for any orientation. A single trace does not measure the
+angle. `tau` is end of pulse to start of pulse, so pulses that are not short
+next to tau bias `nu_dd` by about the pulse length over tau. Sample at least
+four points per oscillation period; a trace that only rises and saturates is a
+bath of targets rather than one coupled spin.
 
 Live windows take the board claim per update and skip a sample rather than
 wait, so a confocal scan can still start. Sweep results are written under:
