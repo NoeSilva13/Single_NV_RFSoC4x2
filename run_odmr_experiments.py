@@ -21,10 +21,16 @@ import sys
 import numpy as np
 
 from rfsoc.client import RFSoCSession
-from rfsoc.config import base_nv_config, edge_counting_warnings_muted
+from rfsoc.config import (
+    base_nv_config,
+    edge_counting_warnings_muted,
+    validate_hardware_settings,
+)
+from rfsoc.deer_program import DEERSpectrumFineRes
 from rfsoc.experiments import (
     coherence_result,
     counting_result,
+    deer_spectrum_result,
     lockin_result,
     pulsed_result,
     rabi_result,
@@ -295,6 +301,27 @@ def main():
     # with session.acquisition():
     #     data = T1FineRes(cfg).acquire(progress=True)
     # result = t1_result(cfg, data)
+
+    # 11. DEER spectrum.  Hahn echo on the sensor at mw_fMHz, a pi pulse on
+    # generator RFSOC_MW2_CHANNEL swept in frequency.  Pick tau near T2/2 from
+    # the Hahn echo; mw2_pi_ftns comes from a Rabi run with cfg.mw_channel set
+    # to the second generator.  mw2_offset_ftns moves the target pulse from the
+    # start of the sensor pi pulse and absorbs the skew between the two DACs.
+    # cfg = copy(default_config)
+    # cfg.reps = 50_000
+    # cfg.get_reference = True
+    # cfg.tau_ftns = 2_000
+    # cfg.mw2_gain = 32_767
+    # cfg.mw2_pi_ftns = 50
+    # cfg.mw2_offset_ftns = 0
+    # cfg.add_linear_sweep("mw2", "fMHz", start=2800, stop=2950, delta=150 / 79)
+    # validate_hardware_settings(
+    #     cfg.mw_fMHz * 1e6, mw2_frequency_hz=cfg.mw2_start_fMHz * 1e6
+    # )
+    # validate_hardware_settings(mw2_frequency_hz=cfg.mw2_end_fMHz * 1e6)
+    # with session.acquisition():
+    #     data = DEERSpectrumFineRes(cfg).acquire(progress=True)
+    # result = deer_spectrum_result(cfg, data)
 
     return report(result)
 

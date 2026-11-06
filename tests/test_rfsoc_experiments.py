@@ -265,6 +265,36 @@ def test_the_odmr_fit_recovers_the_resonance_and_the_linewidth():
     assert fit["linewidth_hz"] == pytest.approx(10e6, rel=0.05)
 
 
+def test_the_deer_spectrum_is_the_echo_the_target_pulse_destroys():
+    from rfsoc.experiments.deer import deer_spectrum_result
+
+    cfg = FakeConfig()
+    cfg.readout_integration_tns = 300
+    cfg.reps = 1_000
+    frequencies_mhz = np.linspace(2800, 2950, 80)
+    # The echo alone sits at 1000 counts; on resonance the target pulse costs
+    # it a fifth of that.
+    lost = 0.2 / (1 + ((frequencies_mhz - 2890) / 3) ** 2)
+    hahn = np.full(frequencies_mhz.size, 1000.0)
+    laser = np.full(frequencies_mhz.size, 1200.0)
+    data = {
+        "signal1": hahn * (1 - lost),
+        "reference1": laser,
+        "signal2": hahn,
+        "reference2": laser,
+        "mw2_fMHz": frequencies_mhz,
+    }
+    result = deer_spectrum_result(cfg, data)
+    assert result.kind == "DEER_Spectrum"
+    np.testing.assert_allclose(result.contrast, lost)
+    assert result.fit["resonance_hz"] == pytest.approx(2.890e9, abs=0.2e6)
+    assert result.fit["linewidth_hz"] == pytest.approx(6e6, rel=0.05)
+    assert result.executed["mw2_fMHz"][0] == pytest.approx(2800)
+    x, y, label = fitted_curve(result)
+    assert x.size == y.size
+    assert "resonance" in label
+
+
 def test_the_t1_fit_recovers_t1():
     delays_ns = np.geomspace(1e3, 3e7, 50)
     contrast = 0.5 * np.exp(-delays_ns * 1e-9 / 5e-3) + 0.5

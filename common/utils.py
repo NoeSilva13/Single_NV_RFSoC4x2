@@ -51,6 +51,9 @@ RFSOC_FIRMWARE = os.environ.get("NV_RFSOC_FIRMWARE", "photon_counting")
 RFSOC_ADC_CHANNEL = 0
 RFSOC_MW_CHANNEL = 0
 RFSOC_MW_NQZ = 2
+# Second tone (DEER target), DAC B combined with channel 0 before the amplifier.
+RFSOC_MW2_CHANNEL = 1
+RFSOC_MW2_NQZ = 2
 RFSOC_AOM_PMOD = 0
 RFSOC_PIXEL_CLOCK_PMOD = 1
 RFSOC_EDGE_HIGH_THRESHOLD = 8000

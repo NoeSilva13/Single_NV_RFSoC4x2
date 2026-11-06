@@ -28,20 +28,32 @@ def expected_nqz(firmware: str, frequency_hz: float) -> int:
     return int(frequency_hz // (sample_rate_hz / 2.0)) + 1
 
 
-def validate_hardware_settings(frequency_hz: float | None = None) -> None:
+def validate_tone(frequency_hz: float, nqz: int) -> None:
+    """Refuse a tone whose Nyquist zone does not match the one configured."""
+    zone = expected_nqz(utils.RFSOC_FIRMWARE, frequency_hz)
+    if zone != int(nqz):
+        raise ValueError(
+            f"{frequency_hz / 1e9:.6g} GHz requires NQZ {zone} with "
+            f"{utils.RFSOC_FIRMWARE}, configured {int(nqz)}"
+        )
+
+
+def validate_hardware_settings(
+    frequency_hz: float | None = None,
+    mw2_frequency_hz: float | None = None,
+) -> None:
     if utils.RFSOC_FIRMWARE not in {"photon_counting", "photon_counting_9ghz"}:
         raise ValueError(f"Unsupported RFSoC firmware: {utils.RFSOC_FIRMWARE}")
     if utils.RFSOC_EDGE_LOW_THRESHOLD >= utils.RFSOC_EDGE_HIGH_THRESHOLD:
         raise ValueError("RFSoC edge low threshold must be below high threshold")
     if utils.RFSOC_AOM_PMOD == utils.RFSOC_PIXEL_CLOCK_PMOD:
         raise ValueError("AOM and pixel clock must use different PMOD pins")
+    if utils.RFSOC_MW_CHANNEL == utils.RFSOC_MW2_CHANNEL:
+        raise ValueError("the two microwave tones must use different DAC channels")
     if frequency_hz is not None:
-        zone = expected_nqz(utils.RFSOC_FIRMWARE, frequency_hz)
-        if zone != utils.RFSOC_MW_NQZ:
-            raise ValueError(
-                f"{frequency_hz / 1e9:.6g} GHz requires NQZ {zone} with "
-                f"{utils.RFSOC_FIRMWARE}, configured {utils.RFSOC_MW_NQZ}"
-            )
+        validate_tone(frequency_hz, utils.RFSOC_MW_NQZ)
+    if mw2_frequency_hz is not None:
+        validate_tone(mw2_frequency_hz, utils.RFSOC_MW2_NQZ)
 
 
 def readout_plan(dwell_seconds: float, readout_clock_hz: float) -> ReadoutPlan:
@@ -123,8 +135,11 @@ def base_nv_config(session, *, reps: int = 1):
     cfg.laser_gate_pmod = utils.RFSOC_AOM_PMOD
     cfg.mw_channel = utils.RFSOC_MW_CHANNEL
     cfg.mw_nqz = utils.RFSOC_MW_NQZ
+    cfg.mw2_channel = utils.RFSOC_MW2_CHANNEL
+    cfg.mw2_nqz = utils.RFSOC_MW2_NQZ
     # NVAveragerProgram.check_cfg accesses mw_gain for every subclass.
     cfg.mw_gain = 0
+    cfg.mw2_gain = 0
     cfg.reps = int(reps)
     cfg.soft_avgs = 1
     cfg.pre_init = True

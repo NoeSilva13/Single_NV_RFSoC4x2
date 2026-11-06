@@ -37,6 +37,11 @@ Run `python -m rfsoc.diagnostics` before either application.
   connector before connecting the instruments.
 - RF DAC channel 0 -> filtered/amplified microwave chain. Measure unwanted
   Nyquist images before connecting the device under test.
+- DEER only: RF DAC channel 1 (`RFSOC_MW2_CHANNEL`) -> one input of a power
+  combiner whose other input is DAC channel 0, ahead of the same amplifier.
+  Check both tones and their images on the spectrum analyzer with the combiner
+  in place, and confirm `connection_report()["mw2_generator"]` reports the
+  second generator rather than `unusable`.
 
 The pin indices in `common/utils.py` are QICK output-pin indices, not connector
 labels. Confirm them against the printed `QickConfig`.
@@ -101,6 +106,7 @@ tears down the streamer, which is QICK's own cleanup path.
    XYZ.
 6. Measure the RF DAC spectrum at the intended gain and NQZ.
 7. Run CW ODMR, pulsed ODMR, Rabi and T1 in that order.
+8. For DEER, repeat step 6 on DAC channel 1 through the combiner.
 
 ## Experiment runner
 
@@ -137,6 +143,28 @@ acquire per offset, under a single board claim.
 | Hahn Echo | `CPMGXYFineRes` (`n_cpmg=1`) | T2 |
 | CPMG-N | `CPMGXYFineRes` (`n_cpmg=N`) | T2 |
 | T1 | `T1FineRes` | T1 |
+| DEER spectrum | `DEERSpectrumFineRes` (this repo) | target resonance, linewidth |
+
+### DEER spectrum
+
+`rfsoc/deer_program.py` plays a Hahn echo on the sensor at `mw_fMHz` on
+generator 0 and a pi pulse on generator 1 (`mw2_*` settings) whose frequency
+is swept in the FPGA. Each point reads the echo with the target pulse and the
+same echo with generator 1's gain at zero; the contrast is the fraction of the
+echo the target pulse removes, so the target resonance is a dip fitted as in
+ODMR. `get_reference` must be `True`. The target pulse starts at the sensor pi
+pulse plus `mw2_offset_ftns`, which also absorbs the skew between the DACs.
+Both tones sit in NQZ 2 with `photon_counting` (`RFSOC_MW2_NQZ`).
+
+Calibrate in this order:
+
+1. Pulsed ODMR and Rabi with `cfg.mw_channel = RFSOC_MW2_CHANNEL` on the
+   target transition, for `mw2_fMHz` and `mw2_pi_ftns` through the second
+   chain. This needs a target that is optically read out in the same spot.
+2. Measure the DAC A / DAC B skew on an oscilloscope and set
+   `mw2_offset_ftns`.
+3. Hahn echo on the sensor; take `tau_ftns` near T2/2.
+4. DEER spectrum.
 
 Live windows take the board claim per update and skip a sample rather than
 wait, so a confocal scan can still start. Sweep results are written under:

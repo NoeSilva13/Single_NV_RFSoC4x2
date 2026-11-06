@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file following [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) guidelines.
 
+## [RFSoC4x2] - 2026-11-06
+### Added
+- DEER spectrum (`rfsoc/deer_program.py`, `DEERSpectrumFineRes`): a Hahn echo
+  on the sensor on generator 0 and a pi pulse on generator 1 whose frequency
+  is swept in the FPGA, as block 11 of `run_odmr_experiments.py`. Each point
+  reads the echo with and without the target pulse; `deer_spectrum_result`
+  fits the dip for the target resonance and linewidth.
+- `RFSOC_MW2_CHANNEL` / `RFSOC_MW2_NQZ` for the second tone,
+  `validate_tone()` and a `mw2_frequency_hz` check in
+  `validate_hardware_settings()`, and `check_second_generator()` in
+  `connection_report()`, which refuses a second generator whose samples per
+  clock or DDS clock differ from generator 0's.
+
 ## [RFSoC4x2] - 2026-09-17
 ### Added
 - The full FineRes experiment set as uncommentable blocks in

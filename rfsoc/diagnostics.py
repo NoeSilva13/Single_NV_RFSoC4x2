@@ -42,11 +42,46 @@ def connection_report(session=None):
         ),
         "mw_channel": utils.RFSOC_MW_CHANNEL,
         "mw_nqz": utils.RFSOC_MW_NQZ,
+        "mw2_channel": utils.RFSOC_MW2_CHANNEL,
+        "mw2_nqz": utils.RFSOC_MW2_NQZ,
         "aom_pmod": utils.RFSOC_AOM_PMOD,
         "pixel_clock_pmod": utils.RFSOC_PIXEL_CLOCK_PMOD,
         "soc_cfg": cfg,
     }
+    try:
+        report["mw2_generator"] = check_second_generator(session.soccfg["gens"])
+    except ValueError as exc:
+        report["mw2_generator"] = f"unusable: {exc}"
     return report
+
+
+def check_second_generator(
+    gens, mw_channel=utils.RFSOC_MW_CHANNEL, mw2_channel=utils.RFSOC_MW2_CHANNEL
+):
+    """Confirm the DEER target generator exists and times like the sensor one.
+
+    NVConfiguration converts every ``_ftns`` and ``_fMHz`` value with generator
+    0's samples per clock and DDS clock, so a second generator that differs in
+    either would play its pulse at the wrong length or the wrong frequency.
+    """
+    if mw2_channel == mw_channel:
+        raise ValueError("the two tones must use different generators")
+    if not 0 <= mw2_channel < len(gens):
+        raise ValueError(
+            f"generator {mw2_channel} is not in this firmware ({len(gens)} generators)"
+        )
+    first, second = gens[mw_channel], gens[mw2_channel]
+    for key in ("samps_per_clk", "f_dds"):
+        if first.get(key) != second.get(key):
+            raise ValueError(
+                f"generator {mw2_channel} {key} {second.get(key)} differs from "
+                f"generator {mw_channel} {first.get(key)}"
+            )
+    return {
+        "channel": mw2_channel,
+        "samps_per_clk": second.get("samps_per_clk"),
+        "f_dds_mhz": second.get("f_dds"),
+    }
 
 
 def validate_mw_frequency(frequency_hz=2.87e9):

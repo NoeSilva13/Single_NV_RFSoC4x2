@@ -121,7 +121,7 @@ def fitted_curve(result):
     ``(x, y, label)`` or ``None`` when there is nothing fitted to draw.
     """
     kind = result.kind
-    if kind in ("CW_ODMR", "Pulsed_ODMR"):
+    if kind in ("CW_ODMR", "Pulsed_ODMR", "DEER_Spectrum"):
         return _odmr_curve(result)
     if kind == "Rabi":
         return _rabi_curve(result)
