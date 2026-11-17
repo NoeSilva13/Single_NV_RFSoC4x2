@@ -160,4 +160,4 @@ spectrometer_app.py
 
 ## License
 
-This application is designed for research and educational use with POA cameras and spectrometer systems. 
+This application is licensed under the [MIT License](../LICENSE). It is intended for use with POA cameras and spectrometer systems. The vendored ZWO interface in `Camera/zwo_camera.py` keeps its own MIT copyright. 

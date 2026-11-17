@@ -98,3 +98,8 @@ known cancellation limitations.
 
 Readout transient, g(2), Ramsey, Hahn echo, removal of the NI DAQ, and
 point-by-point live experiment plotting are not implemented.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE). The ZWO camera
+interface in `Camera/zwo_camera.py` remains under its own MIT copyright.
