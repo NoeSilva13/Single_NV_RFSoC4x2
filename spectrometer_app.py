@@ -25,6 +25,95 @@ from Camera import pyPOACamera
 from common.utils import experiment_data_root
 
 
+UNKNOWN = "unknown"
+
+# Sections of the CSV header, in order: (title, [(config key, label), ...]).
+# Keys missing from the collected configuration are written as ``unknown``.
+_CSV_HEADER_SECTIONS = [
+    ("Camera", [
+        ("model", "model"),
+        ("serial_number", "serial_number"),
+        ("sensor", "sensor"),
+        ("pixel_size_um", "pixel_size_um"),
+        ("bit_depth", "bit_depth"),
+        ("image_format", "image_format"),
+        ("exposure_ms", "exposure_ms"),
+        ("gain", "gain"),
+    ]),
+    ("Resolution", [
+        ("width_px", "width_px"),
+        ("height_px", "height_px"),
+    ]),
+    ("ROI", [
+        ("start_x_px", "start_x_px"),
+        ("width_px", "width_px"),
+        ("start_y_px", "start_y_px"),
+        ("height_px", "height_px"),
+    ]),
+    ("Wavelength calibration", [
+        ("enabled", "enabled"),
+        ("start_nm", "start_nm"),
+        ("end_nm", "end_nm"),
+        ("x_axis", "x_axis"),
+    ]),
+]
+_DARK_DETAIL_KEYS = ("captured_at", "exposure_ms", "gain")
+
+
+def _format_header_value(value) -> str:
+    """Render a configuration value for a ``#`` comment line."""
+    if value is None:
+        return UNKNOWN
+    if isinstance(value, (float, np.floating)):
+        return f"{float(value):.6g}"
+    return str(value)
+
+
+def spectrum_csv_header_lines(config: dict) -> list:
+    """Build the ``#`` comment lines written above a spectrum CSV table.
+
+    ``config`` is a plain dict (see ``SpectrometerMainWindow._collect_spectrum_config``)
+    so this works without a camera or a window. Anything the dict lacks is
+    written as ``unknown`` instead of being left out, so every file has the
+    same layout. The result is read with ``pandas.read_csv(path, comment="#")``.
+    """
+    lines = [
+        f"# Measurement Time: {_format_header_value(config.get('measurement_time'))}",
+        f"# File: {_format_header_value(config.get('file'))}",
+    ]
+    for title, fields in _CSV_HEADER_SECTIONS:
+        section = config.get(title.lower().replace(" ", "_"), {}) or {}
+        lines.append(f"# {title}:")
+        for key, label in fields:
+            lines.append(f"#   {label}: {_format_header_value(section.get(key))}")
+
+    dark = config.get("dark_correction", {}) or {}
+    subtracted = bool(dark.get("subtracted", False))
+    lines.append("# Dark correction:")
+    lines.append(f"#   subtracted: {subtracted}")
+    if subtracted:
+        for key in _DARK_DETAIL_KEYS:
+            lines.append(f"#   dark_{key}: {_format_header_value(dark.get(key))}")
+
+    lines.append("# Processing: ROI rows averaged vertically")
+    spectra = config.get("spectra", {}) or {}
+    lines.append("# Spectra:")
+    lines.append(f"#   count: {_format_header_value(spectra.get('count'))}")
+    lines.append(f"#   recorded: {_format_header_value(spectra.get('recorded', False))}")
+    if spectra.get("recorded"):
+        lines.append(
+            f"#   recording_started: {_format_header_value(spectra.get('recording_started'))}")
+    lines.append("#")
+    return lines
+
+
+def _decode(value) -> str:
+    """Decode a ctypes char array (bytes) to ``str``."""
+    if isinstance(value, bytes):
+        return value.split(b"\x00", 1)[0].decode("utf-8", errors="replace").strip()
+    return str(value)
+
+
 class CameraWorker(QThread):
     """Worker thread for camera operations"""
     frame_ready = pyqtSignal(np.ndarray)
@@ -156,6 +245,7 @@ class SpectrumProcessor:
         self.roi_start_x = 0
         self.roi_width = 6252
         self.dark_frame = None  # Full 2D grayscale frame for dark subtraction
+        self.dark_info = {}     # Capture time / exposure / gain of the dark frame
         
     def set_roi(self, start_y: int, height: int, start_x: int = 0, width: int = 6252):
         """Set region of interest for spectrum extraction"""
@@ -183,14 +273,25 @@ class SpectrumProcessor:
             return frame[:, :, 0]
         return frame
     
-    def set_dark_frame(self, frame: np.ndarray):
-        """Store full frame for dark subtraction (ROI applied at process time)"""
+    def set_dark_frame(self, frame: np.ndarray, exposure_ms: Optional[float] = None,
+                       gain: Optional[int] = None):
+        """Store full frame for dark subtraction (ROI applied at process time).
+
+        ``exposure_ms`` and ``gain`` are the camera settings at capture time,
+        kept so saved spectra can say whether the dark matches the measurement.
+        """
         if frame is not None:
             self.dark_frame = self._to_grayscale(frame).astype(np.float64)
+            self.dark_info = {
+                "captured_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "exposure_ms": exposure_ms,
+                "gain": gain,
+            }
     
     def clear_dark_frame(self):
         """Clear stored dark frame"""
         self.dark_frame = None
+        self.dark_info = {}
     
     def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Extract spectrum from frame
@@ -332,6 +433,10 @@ class SpectrometerMainWindow(QMainWindow):
         self.current_frame = None
         self.is_recording = False
         self.recorded_spectra = []
+        # Configuration snapshot taken when a recording starts (settings can
+        # change while recording; the saved header must describe the start).
+        self._recording_config = None
+        self._recording_started = None
 
         # Current camera image dimensions (updated on connect / resolution change).
         self.img_width = 6252
@@ -1016,7 +1121,11 @@ class SpectrometerMainWindow(QMainWindow):
             QMessageBox.warning(self, "Dark Capture", "No camera frame available. Start the camera first.")
             return
         
-        self.spectrum_processor.set_dark_frame(self.current_frame)
+        self.spectrum_processor.set_dark_frame(
+            self.current_frame,
+            exposure_ms=self.exposure_ms,
+            gain=self.gain_slider.value(),
+        )
         self.clear_dark_button.setEnabled(True)
         self.status_bar.showMessage("Dark captured — subtraction enabled")
     
@@ -1026,6 +1135,58 @@ class SpectrometerMainWindow(QMainWindow):
         self.clear_dark_button.setEnabled(False)
         self.status_bar.showMessage("Dark cleared — subtraction disabled")
     
+    def _collect_spectrum_config(self) -> dict:
+        """Snapshot every setting that shaped the spectrum, for the CSV header.
+
+        ROI, calibration and dark state come from the ``SpectrumProcessor``
+        (what was actually applied); exposure, gain and resolution come from
+        the controls. Device details are read from the camera when connected
+        and left out (written as ``unknown``) otherwise.
+        """
+        proc = self.spectrum_processor
+        calibrated = (proc.wavelength_start_nm is not None
+                      and proc.wavelength_end_nm is not None)
+
+        camera = {
+            "image_format": None,
+            "exposure_ms": self.exposure_ms,
+            "gain": self.gain_slider.value(),
+        }
+        try:
+            cam = self.camera_worker.camera
+            fmt = getattr(cam, "image_format", None)
+            camera["image_format"] = getattr(fmt, "name", fmt)
+            props = getattr(cam, "camera_props", None)
+            if props is not None:
+                camera["model"] = _decode(props.cameraModelName)
+                camera["serial_number"] = _decode(props.SN)
+                camera["sensor"] = _decode(props.sensorModelName)
+                camera["pixel_size_um"] = float(props.pixelSize)
+                camera["bit_depth"] = int(props.bitDepth)
+        except Exception as e:
+            print(f"Could not read camera details for the CSV header: {e}")
+
+        return {
+            "camera": camera,
+            "resolution": {"width_px": self.img_width, "height_px": self.img_height},
+            "roi": {
+                "start_x_px": proc.roi_start_x,
+                "width_px": proc.roi_width,
+                "start_y_px": proc.roi_start_y,
+                "height_px": proc.roi_height,
+            },
+            "wavelength_calibration": {
+                "enabled": calibrated,
+                "start_nm": proc.wavelength_start_nm,
+                "end_nm": proc.wavelength_end_nm,
+                "x_axis": "wavelength_nm" if calibrated else "pixel_index",
+            },
+            "dark_correction": {
+                "subtracted": proc.dark_frame is not None,
+                **proc.dark_info,
+            },
+        }
+
     def toggle_recording(self):
         """Toggle spectrum recording"""
         if self.is_recording:
@@ -1035,6 +1196,8 @@ class SpectrometerMainWindow(QMainWindow):
         else:
             self.is_recording = True
             self.recorded_spectra = []
+            self._recording_config = self._collect_spectrum_config()
+            self._recording_started = time.strftime("%Y-%m-%d %H:%M:%S")
             self.record_button.setText("Stop Recording")
             self.status_bar.showMessage("Recording started")
     
@@ -1058,9 +1221,17 @@ class SpectrometerMainWindow(QMainWindow):
         """Auto-save current or recorded spectra (CSV + PNG) in data/<day>/Spectra"""
         if self.recorded_spectra:
             spectra = list(self.recorded_spectra)
+            config = dict(self._recording_config or self._collect_spectrum_config())
+            config["spectra"] = {
+                "count": len(spectra),
+                "recorded": True,
+                "recording_started": self._recording_started,
+            }
         elif self.current_frame is not None:
             wavelengths, intensities = self.spectrum_processor.process_frame(self.current_frame)
             spectra = [(wavelengths, intensities)]
+            config = self._collect_spectrum_config()
+            config["spectra"] = {"count": 1, "recorded": False}
         else:
             self.status_bar.showMessage("No spectrum to save")
             return
@@ -1073,7 +1244,7 @@ class SpectrometerMainWindow(QMainWindow):
 
         csv_path = base + ".csv"
         png_path = base + ".png"
-        if self.save_spectra_to_file(csv_path, spectra):
+        if self.save_spectra_to_file(csv_path, spectra, config):
             self.save_spectrum_image(png_path, spectra)
             self.status_bar.showMessage(f"Spectrum saved: {csv_path} (+ .png)")
 
@@ -1108,10 +1279,22 @@ class SpectrometerMainWindow(QMainWindow):
             QMessageBox.critical(self, "Save Error", f"Failed to save image: {str(e)}")
             return False
 
-    def save_spectra_to_file(self, filename: str, spectra: list) -> bool:
-        """Save spectra to CSV file. Returns True on success."""
+    def save_spectra_to_file(self, filename: str, spectra: list,
+                             config: Optional[dict] = None) -> bool:
+        """Save spectra to CSV file. Returns True on success.
+
+        The table is preceded by ``#`` comment lines with the full
+        configuration (read back with ``pandas.read_csv(path, comment="#")``).
+        """
         try:
-            with open(filename, 'w') as f:
+            if config is None:
+                config = self._collect_spectrum_config()
+                config["spectra"] = {"count": len(spectra), "recorded": len(spectra) > 1}
+            config = dict(config)
+            config.setdefault("measurement_time", time.strftime("%Y-%m-%d %H:%M:%S"))
+            config.setdefault("file", os.path.splitext(os.path.basename(filename))[0])
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write("\n".join(spectrum_csv_header_lines(config)) + "\n")
                 if len(spectra) == 1:
                     # Single spectrum
                     wavelengths, intensities = spectra[0]
@@ -1138,6 +1321,9 @@ class SpectrometerMainWindow(QMainWindow):
         """Clear spectrum plot"""
         self.spectrum_plot.clear()
         self.recorded_spectra = []
+        if not self.is_recording:
+            self._recording_config = None
+            self._recording_started = None
         self.status_bar.showMessage("Spectrum cleared")
     
     def setup_roi_button(self):

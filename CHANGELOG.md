@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file following [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) guidelines.
 
 ## [Unreleased]
+### Added
+- Spectrometer CSVs now start with `#` comment lines holding the full
+  configuration (camera, resolution, ROI, wavelength calibration, dark
+  correction, number of spectra), like the RFSoC sweep CSVs. The data table is
+  unchanged; read it with `pandas.read_csv(path, comment="#")`. A recorded series
+  stores the configuration from when recording started. The dark frame now
+  remembers the exposure and gain it was captured with.
+
 ### Changed
 - Every saved figure is titled with its own file name without extension (for
   example `112326003_Rabi`): RFSoC experiment PDFs, confocal scan PNGs and

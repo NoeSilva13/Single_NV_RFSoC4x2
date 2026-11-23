@@ -121,6 +121,16 @@ CSV files contain:
 - **Single spectrum**: Wavelength, Intensity
 - **Multiple spectra**: Wavelength, Spectrum_1, Spectrum_2, ...
 
+Every CSV starts with a block of `#` comment lines holding the full configuration
+of the measurement: measurement time and file name, camera (model, serial number,
+sensor, pixel size, bit depth, image format, exposure, gain), resolution, ROI,
+wavelength calibration (and whether the X axis is `wavelength_nm` or
+`pixel_index`), dark correction (whether it was subtracted, and the time, exposure
+and gain at which the dark was captured) and the number of spectra. Values that
+cannot be read (for example a disconnected camera) are written as `unknown`. For
+recorded series the configuration is the one in effect when recording started.
+Read the table with `pandas.read_csv(path, comment="#")`.
+
 ## Troubleshooting
 
 ### Camera Connection Issues
