@@ -1089,14 +1089,15 @@ class SpectrometerMainWindow(QMainWindow):
             if len(spectra) == 1:
                 w, y = spectra[0]
                 ax.plot(w, y, color='#00a080', linewidth=1.2)
-                ax.set_title("Spectrum")
             else:
                 for w, y in spectra:
                     ax.plot(w, y, color='gray', alpha=0.25, linewidth=0.6)
                 mean_y = np.mean([y for _, y in spectra], axis=0)
-                ax.plot(spectra[0][0], mean_y, color='#00a080', linewidth=1.5, label='Mean')
+                ax.plot(spectra[0][0], mean_y, color='#00a080', linewidth=1.5,
+                        label=f'Mean of {len(spectra)} spectra')
                 ax.legend()
-                ax.set_title(f"Spectra ({len(spectra)} recorded)")
+            # Title is the file name without extension.
+            ax.set_title(os.path.splitext(os.path.basename(filename))[0])
             ax.set_xlabel("Wavelength (nm)")
             ax.set_ylabel("Intensity")
             ax.grid(True, alpha=0.3)

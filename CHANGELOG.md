@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file following [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) guidelines.
 
+## [Unreleased]
+### Changed
+- Every saved figure is titled with its own file name without extension (for
+  example `112326003_Rabi`): RFSoC experiment PDFs, confocal scan PNGs and
+  spectrum PNGs. `plot_scan_results` now defaults to `show_title=True` with
+  `title=None` meaning the file stem; pass `show_title=False` for title-less
+  publication panels. Spectrum plots report the number of recorded spectra in
+  the legend instead of the title.
+
 ## [RFSoC4x2] - 2026-09-17
 ### Added
 - The full FineRes experiment set as uncommentable blocks in

@@ -56,8 +56,8 @@ CBLABEL = "SPD counts"
 
 
 def plot_scan_results(scan_data: dict, save_path: str | Path, *,
-                      title: str = "Confocal scan",
-                      show_title: bool = False,
+                      title: str | None = None,
+                      show_title: bool = True,
                       show_scalebar: bool = True,
                       axis_labels: tuple[str, str] = ("x", "y")) -> Path:
     """
@@ -71,8 +71,9 @@ def plot_scan_results(scan_data: dict, save_path: str | Path, *,
                         image               : 2D array (ny, nx) in raw counts.
                         Row 0 of image must correspond to the smallest y value.
         save_path:      output path — extension is replaced with .png / .pdf
-        title:          figure title (shown only when show_title is True)
-        show_title:     set to False for publication panels
+        title:          figure title; defaults to the file name of ``save_path``
+                        without extension (shown only when show_title is True)
+        show_title:     set to False for title-less publication panels
         show_scalebar:  draw a white scale bar on the image
         axis_labels:    (horizontal, vertical) axis names, e.g. ``("x", "z")``
                         for an XZ scan. Horizontal = fast axis (columns),
@@ -82,6 +83,8 @@ def plot_scan_results(scan_data: dict, save_path: str | Path, *,
         Path to the saved PNG.
     """
     save_path = Path(save_path)
+    if title is None:
+        title = save_path.stem
 
     x_grid = np.asarray(scan_data["x_points"])   # 1D, micrometers
     y_grid = np.asarray(scan_data["y_points"])   # 1D, micrometers

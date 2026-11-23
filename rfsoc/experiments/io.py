@@ -202,11 +202,16 @@ def plot_result(result, save=True, show=True):
         ax_fft.set_ylabel("Amplitude (a.u.)")
         ax_fft.grid(True, alpha=0.3)
 
-    fig.suptitle(f"RFSoC4x2 {result.kind}")
+    if save and not result.saved_files:
+        save_result(result)
+    if result.saved_files.get("npz"):
+        # The figure is titled with the name of the files it is saved beside.
+        title = os.path.splitext(os.path.basename(result.saved_files["npz"]))[0]
+    else:
+        title = f"RFSoC4x2 {result.kind}"
+    fig.suptitle(title)
     fig.tight_layout()
     if save:
-        if not result.saved_files:
-            save_result(result)
         pdf_path = os.path.splitext(result.saved_files["npz"])[0] + ".pdf"
         fig.savefig(pdf_path)
         result.saved_files["pdf"] = pdf_path

@@ -339,6 +339,51 @@ def test_the_figure_draws_contrast_as_a_percentage(monkeypatch):
         close_figure(fig)
 
 
+def test_the_saved_figure_is_titled_with_its_file_name(tmp_path, monkeypatch):
+    import matplotlib.pyplot as plt
+
+    plt.switch_backend("Agg")  # no Tk window needed to check a title
+    closed = []
+    monkeypatch.setattr(
+        "rfsoc.experiments.io._next_stem",
+        lambda kind: str(tmp_path / f"112326003_{kind}"),
+    )
+    monkeypatch.setattr("rfsoc.experiments.io.plt.close", lambda fig: closed.append(fig))
+    result = sweep_result("Rabi", np.array([0.0, 10.0]), np.array([0.0, 0.1]))
+    plot_result(result, save=True, show=False)
+
+    assert (tmp_path / "112326003_Rabi.pdf").exists()
+    assert closed[0]._suptitle.get_text() == "112326003_Rabi"
+    plt.close(closed[0])
+
+
+def test_scan_figure_is_titled_with_its_file_name(tmp_path):
+    from matplotlib.figure import Figure
+
+    from confocal.plot_scan_results import plot_scan_results
+
+    titles = []
+    original_savefig = Figure.savefig
+
+    def spy(self, *args, **kwargs):
+        titles.append(self.axes[0].get_title())
+        return original_savefig(self, *args, **kwargs)
+
+    scan_data = {
+        "x_points": np.linspace(0, 5, 4),
+        "y_points": np.linspace(0, 5, 4),
+        "image": np.arange(16, dtype=float).reshape(4, 4),
+    }
+    Figure.savefig = spy
+    try:
+        png = plot_scan_results(scan_data, tmp_path / "112326004.csv")
+    finally:
+        Figure.savefig = original_savefig
+
+    assert png.name == "112326004.png"
+    assert titles == ["112326004"]
+
+
 def test_save_result_writes_configuration_in_the_csv_header(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "rfsoc.experiments.io._next_stem",
